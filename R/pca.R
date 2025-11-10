@@ -393,6 +393,7 @@ make_heatmap_from_loadings <- function(
     cluster_columns = FALSE,
     meta_to_include = NULL,
     meta_to_exclude = NULL,
+    rankname_order = NULL,
     ...){
 
 
@@ -457,6 +458,7 @@ make_heatmap_from_loadings <- function(
         title = "Top 5% Loadings",
         cluster_rows = cluster_rows,
         cluster_columns = cluster_columns,
+        rankname_order = rankname_order,
         cut_by = .cut_by,
         save_func = .save_func,
       )}, error = function(msg) { log_msg(error=msg) }
@@ -516,6 +518,8 @@ make_heatmap_from_loadings <- function(
         cluster_columns = cluster_columns,
         cut_by = .cut_by,
         save_func = .save_func,
+        # rankname_order = params$extra$rankname_order
+        rankname_order = rankname_order,
       )}, error = function(msg) { log_msg(error=msg) }
     ) # end of tryCatch
   }) # end of pmap
@@ -800,18 +804,58 @@ run_gene_pca_pipeline <- function(gct, params, savedir, replace = TRUE) {
   if (isTRUE(params$heatmap)) {
     heatmap_cluster_rows <- params$cluster_rows %||% TRUE
     heatmap_cluster_columns <- params$cluster_columns %||% c(FALSE, TRUE)
-    heatmap_cut_by <- params$cut_by %||% NULL
-    if (is.character(heatmap_cut_by)) {
-      heatmap_cut_by <- heatmap_cut_by[nzchar(heatmap_cut_by)]
-    }
-    if (length(heatmap_cut_by) > 0) {
-      heatmap_cut_by <- heatmap_cut_by[[1]]
-    } else {
-      heatmap_cut_by <- NULL
-    }
-    if (is.logical(heatmap_cut_by) && !isTRUE(heatmap_cut_by)) {
-      heatmap_cut_by <- NULL
-    }
+    heatmap_cut_by <- util_tools$process_cut_by(params$cut_by %||% NULL)
+
+   # requested_rank_order <- params$extra$rankname_order
+   # available_ranknames <- unique(df$rankname)
+
+   # if (!is.null(requested_rank_order)) {
+   #   missing_ranknames <- setdiff(requested_rank_order, available_ranknames)
+   #   if (length(missing_ranknames) > 0) {
+   #     log_msg(warning = paste0(
+   #       "rankname_order entries not present in results: ",
+   #       paste(missing_ranknames, collapse = ", "),
+   #       ". These names will be ignored."
+   #     ))
+   #   }
+
+   #   duplicated_ranknames <- requested_rank_order[duplicated(requested_rank_order)]
+   #   if (length(duplicated_ranknames) > 0) {
+   #     log_msg(warning = paste0(
+   #       "rankname_order contains duplicate labels: ",
+   #       paste(unique(duplicated_ranknames), collapse = ", "),
+   #       ". Keeping the first occurrence of each."
+   #     ))
+   #   }
+   #   rankname_order <- available_ranknames
+   #   log_msg(debug = "rankname_order not supplied; using detected order from results")
+   # } else {
+   #   rankname_order <- intersect(rankname_order, available_ranknames)
+   #   if (length(rankname_order) == 0) {
+   #     warning("rankname_order is empty, using default")
+   #     rankname_order <- available_ranknames # default backup
+   #   } else if (!is.null(requested_rank_order)) {
+   #     if (length(rankname_order) < length(unique(requested_rank_order))) {
+   #       log_msg(info = paste0(
+   #         "Applied rankname_order for ",
+   #         length(rankname_order),
+   #         " comparisons (", length(unique(requested_rank_order)), " requested)."
+   #       ))
+   #     }
+   #   }
+   #   pca_res <- pca_res[, rankname_order]
+
+    # if (is.character(heatmap_cut_by)) {
+    #   heatmap_cut_by <- heatmap_cut_by[nzchar(heatmap_cut_by)]
+    # }
+    # if (length(heatmap_cut_by) > 0) {
+    #   heatmap_cut_by <- heatmap_cut_by[[1]]
+    # } else {
+    #   heatmap_cut_by <- NULL
+    # }
+    # if (is.logical(heatmap_cut_by) && !isTRUE(heatmap_cut_by)) {
+    #   heatmap_cut_by <- NULL
+    # }
 
     heatmap_save <- util_tools$make_partial(
       plot_utils$plot_and_save,

@@ -1356,6 +1356,7 @@ plot_results_one_collection <- function(
 
   # Handling cut_by parameter
   # print(paste0("cutting by :", cut_by))
+
   if (!is.null(cut_by)) {
     if (length(cut_by) > 1) {
       cut_by <- cut_by[1]
@@ -1363,12 +1364,16 @@ plot_results_one_collection <- function(
     }
     if (!is.null(cut_by) && cut_by %in% colnames(metadata)) {
       cut_by <- metadata[, cut_by]
-      cut_by <- factor(cut_by, levels = unique(cut_by))
+      #cut_by <- util_tools$infer_ordered_factor(cut_by)
+      #metadata[, cut_by] <- cut_by
+      # cut_by <- factor(cut_by, levels = unique(cut_by))
     } else {
       warning("cut_by not found in metadata, setting to NULL")
       cut_by <- NULL
     }
   }
+
+  #dfp[
 
   # calculate quantile before selection
   # Set up color scale

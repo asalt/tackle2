@@ -177,6 +177,7 @@ run <- function(params) {
         params = params$pca_gene,
         savedir = params$savedir,
         replace = params$advanced$replace %||% TRUE
+        #rankname_order = params$extra$rankname_order,
       )
     }
   }
@@ -307,6 +308,7 @@ run <- function(params) {
           shape = params$pca$mark_by %||% params$mark_by %||% NULL,
           fig_width = params$pca$width %||% 8.4,
           fig_height = params$pca$height %||% 7.6,
+          rankname_order = params$extra$rankname_order,
           # group_order = params$extra$facet_order %||% NULL
         )
 
