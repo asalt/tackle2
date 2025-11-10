@@ -671,6 +671,22 @@ create_rnkfiles_from_model <- function(
     contrasts <- as.list(contrasts)
   }
 
+  # Optional automatic factor-style contrast generation
+  factor_spec <- spec$factor_contrasts %||% spec$glm_factor %||% NULL
+  factor_var <- NULL
+  factor_modes <- NULL
+  factor_baseline <- NULL
+  if (!is.null(factor_spec)) {
+    factor_var <- as.character(factor_spec$variable %||% factor_spec$var %||% factor_spec$factor %||% "")
+    if (nzchar(factor_var)) {
+      # modes: baseline, rest (one-vs-rest), pairwise
+      factor_modes <- tolower(as.character(unlist(factor_spec$modes %||% list("rest")) ))
+      factor_baseline <- as.character(factor_spec$baseline %||% factor_spec$reference %||% "")
+    } else {
+      factor_var <- NULL
+    }
+  }
+
   sig_cutoff <- spec$volcano_padj_cutoff %||% 0.05
   label_top_n <- spec$volcano_top_n %||% 35
 
@@ -868,12 +884,12 @@ create_rnkfiles_from_model <- function(
       stop("All design columns were dropped; check model specification.")
     }
 
-    apply_contrasts <- length(contrasts) > 0
-    pretty_alias_map <- stats::setNames(
-      vapply(sanitized_terms, function(term) prettify_term_label(term_lookup[[term]], term), character(1)),
-      sanitized_terms
-    )
-    alias_to_term <- stats::setNames(names(pretty_alias_map), pretty_alias_map)
+  apply_contrasts <- FALSE
+  pretty_alias_map <- stats::setNames(
+    vapply(sanitized_terms, function(term) prettify_term_label(term_lookup[[term]], term), character(1)),
+    sanitized_terms
+  )
+  alias_to_term <- stats::setNames(names(pretty_alias_map), pretty_alias_map)
 
     normalize_contrast_expression <- function(expr) {
       updated <- expr
@@ -885,42 +901,146 @@ create_rnkfiles_from_model <- function(
       updated
     }
 
-    if (apply_contrasts) {
-      contrast_defs <- parse_contrast_specs(contrasts)
-      for (idx in seq_along(contrast_defs)) {
-        raw_expr <- contrast_defs[[idx]]$expression
-        converted <- normalize_contrast_expression(raw_expr)
-        contrast_defs[[idx]]$expression <- converted
-        if (converted %in% sanitized_terms) {
-          contrast_defs[[idx]]$coef_name <- converted
-        } else if (raw_expr %in% alias_to_term) {
-          contrast_defs[[idx]]$coef_name <- alias_to_term[[raw_expr]]
-        }
-        if (is.null(contrast_defs[[idx]]$coef_name)) {
-          contrast_defs[[idx]]$coef_name <- converted
+  # Build user-specified contrast defs (if any)
+  contrast_defs <- list()
+  if (length(contrasts) > 0) {
+    user_defs <- parse_contrast_specs(contrasts)
+    for (idx in seq_along(user_defs)) {
+      raw_expr <- user_defs[[idx]]$expression
+      converted <- normalize_contrast_expression(raw_expr)
+      user_defs[[idx]]$expression <- converted
+      if (converted %in% sanitized_terms) {
+        user_defs[[idx]]$coef_name <- converted
+      } else if (raw_expr %in% alias_to_term) {
+        user_defs[[idx]]$coef_name <- alias_to_term[[raw_expr]]
+      }
+      if (is.null(user_defs[[idx]]$coef_name)) {
+        user_defs[[idx]]$coef_name <- converted
+      }
+    }
+    contrast_defs <- c(contrast_defs, user_defs)
+  }
+
+  # Auto-generate factor contrasts if requested
+  if (!is.null(factor_var)) {
+    # Identify columns for this factor in original terms
+    factor_cols_idx <- which(
+      grepl(paste0("^", factor_var), original_terms) |
+        grepl(paste0("^factor\\(", factor_var, "\\)"), original_terms)
+    )
+    if (length(factor_cols_idx) >= 2) {
+      factor_terms_orig <- original_terms[factor_cols_idx]
+      factor_terms_sanitized <- sanitized_terms[factor_cols_idx]
+      # Extract levels from original names by stripping prefix
+      levels_from_orig <- vapply(seq_along(factor_terms_orig), function(i) {
+        o <- factor_terms_orig[[i]]
+        o <- sub(paste0("^factor\\(", factor_var, "\\)"), "", o)
+        o <- sub(paste0("^", factor_var), "", o)
+        o
+      }, character(1))
+
+      # Helper: safe label for file names
+      mk_stub <- function(...) util_tools$safe_filename(..., fallback = paste0(factor_var, "_contrast"))
+
+      # Modes
+      modes <- unique(factor_modes %||% character(0))
+      if (length(modes) == 0) modes <- c("rest")
+
+      # baseline contrasts
+      if ("baseline" %in% modes) {
+        base <- factor_baseline
+        if (!nzchar(base)) base <- levels_from_orig[[1]]
+        base_idx <- match(base, levels_from_orig)
+        if (!is.na(base_idx)) {
+          base_term <- factor_terms_sanitized[[base_idx]]
+          for (i in seq_along(levels_from_orig)) {
+            if (i == base_idx) next
+            li <- factor_terms_sanitized[[i]]
+            lname <- levels_from_orig[[i]]
+            expr <- sprintf("%s - %s", li, base_term)
+            alias <- paste0(factor_var, "_", lname, "_vs_", base)
+            contrast_defs[[length(contrast_defs) + 1]] <- list(
+              alias = alias,
+              expression = expr,
+              file_stub = mk_stub(alias),
+              original_term = alias,
+              coef_name = NULL
+            )
+          }
         }
       }
-      contrast_args <- setNames(
-        lapply(contrast_defs, function(def) def$expression),
-        vapply(contrast_defs, function(def) def$alias, character(1))
-      )
-      contrast_matrix <- do.call(
-        limma::makeContrasts,
-        c(contrast_args, list(levels = sanitized_terms))
-      )
-      if (is.null(dim(contrast_matrix))) {
-        contrast_matrix <- matrix(
-          contrast_matrix,
-          ncol = 1,
-          dimnames = list(sanitized_terms, names(contrast_args))
-        )
+
+      # one-vs-rest contrasts
+      if ("rest" %in% modes || "one-vs-rest" %in% modes) {
+        nlev <- length(factor_terms_sanitized)
+        for (i in seq_along(factor_terms_sanitized)) {
+          li <- factor_terms_sanitized[[i]]
+          lname <- levels_from_orig[[i]]
+          others <- setdiff(factor_terms_sanitized, li)
+          if (length(others) > 0) {
+            mean_other <- paste("(", paste(others, collapse = "+"), ")/", length(others), sep = "")
+            expr <- sprintf("%s - %s", li, mean_other)
+            alias <- paste0(factor_var, "_", lname, "_vs_rest")
+            contrast_defs[[length(contrast_defs) + 1]] <- list(
+              alias = alias,
+              expression = expr,
+              file_stub = mk_stub(alias),
+              original_term = alias,
+              coef_name = NULL
+            )
+          }
+        }
+      }
+
+      # pairwise contrasts
+      if ("pairwise" %in% modes) {
+        k <- length(factor_terms_sanitized)
+        if (k >= 2) {
+          for (i in 1:(k - 1)) {
+            for (j in (i + 1):k) {
+              li <- factor_terms_sanitized[[i]]; lj <- factor_terms_sanitized[[j]]
+              lname_i <- levels_from_orig[[i]]; lname_j <- levels_from_orig[[j]]
+              expr <- sprintf("%s - %s", li, lj)
+              alias <- paste0(factor_var, "_", lname_i, "_vs_", lname_j)
+              contrast_defs[[length(contrast_defs) + 1]] <- list(
+                alias = alias,
+                expression = expr,
+                file_stub = mk_stub(alias),
+                original_term = alias,
+                coef_name = NULL
+              )
+            }
+          }
+        }
       }
     } else {
-      is_intercept <- sanitized_terms %in% c("(Intercept)", "Intercept", "XIntercept", "X.Intercept.")
-      base_terms <- sanitized_terms[!is_intercept]
-      if (length(base_terms) == 0) {
-        base_terms <- sanitized_terms
-      }
+      log_msg(warning = paste0("factor_contrasts: variable '", factor_var, "' has <2 levels in design; skipping auto contrasts"))
+    }
+  }
+
+  if (length(contrast_defs) > 0) {
+    apply_contrasts <- TRUE
+    contrast_args <- setNames(
+      lapply(contrast_defs, function(def) def$expression),
+      vapply(contrast_defs, function(def) def$alias, character(1))
+    )
+    contrast_matrix <- do.call(
+      limma::makeContrasts,
+      c(contrast_args, list(levels = sanitized_terms))
+    )
+    if (is.null(dim(contrast_matrix))) {
+      contrast_matrix <- matrix(
+        contrast_matrix,
+        ncol = 1,
+        dimnames = list(sanitized_terms, names(contrast_args))
+      )
+    }
+  } else {
+    is_intercept <- sanitized_terms %in% c("(Intercept)", "Intercept", "XIntercept", "X.Intercept.")
+    base_terms <- sanitized_terms[!is_intercept]
+    if (length(base_terms) == 0) {
+      base_terms <- sanitized_terms
+    }
       if (length(base_terms) == 0) {
         stop("Design matrix contains no estimable terms after removing intercept.")
       }

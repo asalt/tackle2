@@ -1280,7 +1280,7 @@ make_partial <- function(.f, ...) {
 globalloglevel <- options(pkg_option_name("loglevel"))[[1]] %||% "INFO"
 
 log_msg <- function(msg = NULL, info = NULL, debug = NULL, warning = NULL, warn = NULL, error = NULL, filename = NULL, end = "\n", shell = T, loglevel = loglevel, send_over_socket = TRUE, socket_port = 8765, ...) {
-  level <- case_when(
+  level <- dplyr::case_when(
     !is.null(msg) ~ "INFO",
     !is.null(info) ~ "INFO",
     !is.null(warning) ~ "WARNING",
