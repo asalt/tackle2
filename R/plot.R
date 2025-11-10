@@ -995,6 +995,15 @@ all_barplots_with_numbers <- function(
               nes_range <- c(-nes_max, nes_max)
               .limit <- .x
               sel <- fgsea_tools$select_topn(dataframe, limit = .limit, pstat_cutoff=1)
+              if (nrow(sel) == 0) {
+                log_msg(warning = paste0(
+                  "no pathways available for barplot (requested top ", .limit, ") in ",
+                  collection_name, " / ", comparison_name
+                ))
+                return(NULL)
+              }
+              pathway_count <- dplyr::n_distinct(sel$pathway)
+              effective_limit <- min(.limit, pathway_count)
               .title <- comparison_label %||% comparison_name # %>% fs::path_file() %>% fs::path_ext_remove() #%>% gsub(pattern="_", replacement=" ", x=.)
 
               rank_label <- sel$rankname %>% na.omit() %>% unique()
@@ -1002,9 +1011,9 @@ all_barplots_with_numbers <- function(
                 stringr::str_replace_all("_", " ") %>%
                 paste(collapse = ", ")
               base_subtitle <- if (!is.null(rank_label)) {
-                paste0("rank: ", rank_label, " • top ", .limit)
+                paste0("rank: ", rank_label, " • top ", effective_limit)
               } else {
-                paste0("top ", .limit, " pathways")
+                paste0("top ", effective_limit, " pathways")
               }
               subtitle_text <- paste0(base_subtitle, " • source: ", collection_label)
 
@@ -1021,8 +1030,8 @@ all_barplots_with_numbers <- function(
                 )
                 filename <- util_tools$safe_filename(
                   "bar",
-                  #paste0("top", .limit), # this part not needed
-                  paste0("n", nrow(sel)),
+                  paste0("top", effective_limit),
+                  paste0("n", pathway_count),
                   fallback = "bar"
                 )
                 local_save_func <- make_partial(local_save_func, filename = filename, path = save_path)
@@ -1081,6 +1090,14 @@ do_combined_barplots <- function(
       n_sel <- res %>%
         distinct(pathway) %>%
         nrow()
+      effective_limit <- min(.limit, n_sel)
+      if (n_sel == 0) {
+        log_msg(warning = paste0(
+          "no pathways available for combined barplot (requested top ", .limit, ") for ",
+          geneset_name
+        ))
+        return(NULL)
+      }
       log_msg(msg = paste0(
         "bar combined: geneset=", geneset_name,
         " limit=", .limit,
@@ -1098,6 +1115,7 @@ do_combined_barplots <- function(
         filename <- util_tools$safe_filename(
           get_arg(local_save_func, "filename"),
           "bar",
+          paste0("top", effective_limit),
           paste0("n", n_sel),
           "all",
           fallback = "bar_all"
@@ -1110,7 +1128,7 @@ do_combined_barplots <- function(
       }
       p <- res %>% barplot_with_numbers(
         title = geneset_name,
-        subtitle = paste0("top ", .limit, " pathways • source: ", collection_label),
+        subtitle = paste0("top ", effective_limit, " pathways • source: ", collection_label),
         nes_range = nes_range,
         save_func = local_save_func,
         facet_order = facet_order,

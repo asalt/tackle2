@@ -336,6 +336,15 @@ all_bubble_plots <- function(
               " limit=", .limit,
               " selected_rows=", nrow(sel)
             ))
+            if (nrow(sel) == 0) {
+              log_msg(warning = paste0(
+                "no pathways available for bubble plot (requested top ", .limit, ") in ",
+                collection_name, " / ", comparison_name
+              ))
+              return(NULL)
+            }
+            n_pathways <- dplyr::n_distinct(sel$pathway)
+            effective_limit <- min(.limit, n_pathways)
             nes_max <- suppressWarnings(max(abs(dataframe$NES), na.rm = TRUE))
             nes_range <- if (is.finite(nes_max)) c(-nes_max, nes_max) else NULL
 
@@ -346,8 +355,8 @@ all_bubble_plots <- function(
               comparison_dir <- util_tools$safe_path_component(comparison_label)
               filename <- util_tools$safe_filename(
                 "bubble",
-                paste0("top", .limit),
-                paste0("n", nrow(sel)),
+                paste0("top", effective_limit),
+                paste0("n", n_pathways),
                 fallback = "bubble"
               )
               save_path <- util_tools$safe_subdir(
@@ -371,9 +380,9 @@ all_bubble_plots <- function(
                 paste(collapse = ", ")
             }
             base_subtitle <- if (!is.null(rank_label)) {
-              paste0("rank: ", rank_label, " • top ", .limit)
+              paste0("rank: ", rank_label, " • top ", effective_limit)
             } else {
-              paste0("top ", .limit, " pathways")
+              paste0("top ", effective_limit, " pathways")
             }
             subtitle_text <- paste0(base_subtitle, " • source: ", collection_label)
 
@@ -414,6 +423,14 @@ do_combined_bubble_plots <- function(
       res <- fgsea_res_list %>% bind_rows(.id = "rankname")
       res <- fgsea_tools$select_topn(res, limit = .limit, pstat_cutoff = 1)
       n_sel <- res %>% distinct(pathway) %>% nrow()
+      effective_limit <- min(.limit, n_sel)
+      if (n_sel == 0) {
+        log_msg(warning = paste0(
+          "no pathways available for combined bubble plot (requested top ", .limit, ") for ",
+          geneset_name
+        ))
+        return(NULL)
+      }
       log_msg(msg = paste0(
         "bubble combined: geneset=", geneset_name,
         " limit=", .limit,
@@ -428,6 +445,7 @@ do_combined_bubble_plots <- function(
         geneset_dir <- util_tools$safe_path_component(geneset_name)
         filename <- util_tools$safe_filename(
           "bubble",
+          paste0("top", effective_limit),
           paste0("n", n_sel),
           "all",
           fallback = "bubble_all"
@@ -442,7 +460,7 @@ do_combined_bubble_plots <- function(
       bubble_plot(
         res,
         title = geneset_name,
-        subtitle = paste0("top ", .limit, " pathways • source: ", collection_label),
+        subtitle = paste0("top ", effective_limit, " pathways • source: ", collection_label),
         save_func = local_save_func,
         facet_order = facet_order,
         nes_range = nes_range,
