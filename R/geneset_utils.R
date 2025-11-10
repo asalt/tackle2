@@ -6,6 +6,8 @@ suppressPackageStartupMessages(library(memoise))
 suppressPackageStartupMessages(library(dplyr))
 suppressPackageStartupMessages(library(here))
 suppressPackageStartupMessages(library(msigdbr))
+suppressPackageStartupMessages(library(rlang))
+suppressPackageStartupMessages(library(tibble))
 
 # util_tools <- new.env()
 # source(file.path(here("R"), "./utils.R"), local = util_tools)
@@ -186,15 +188,65 @@ genesets_df_to_list <- function(list_of_geneset_dfs) { # the input here is a dat
 
 
 geneset_array_to_df <- function(gs) {
-  df <- do.call(rbind, lapply(gs, function(x) {
-    data.frame(
-      category = x$category,
-      subcategory = x$subcategory,
-      # collection = x$collection,
-      # subcollection = x$subcollection,
-      collapse = x$collapse,
-      stringsAsFactors = FALSE
+  # normalise a mixed list of user-supplied entries into a rectangular data frame
+  # (one row per geneset declaration). Each field is collapsed to a single scalar
+  # so that `bind_rows()` never encounters vectors of differing lengths.
+  first_or <- function(value, default) {
+    if (is.null(value) || length(value) == 0) default else value[[1]]
+  }
+
+  entries <- gs %||% list()
+  if (length(entries) == 0) {
+    return(tibble::tibble(
+      category = character(0),
+      subcategory = character(0),
+      collapse = logical(0)
+    ))
+  }
+
+  rows <- purrr::imap(entries, function(entry, idx) {
+    entry <- entry %||% list()
+
+    category_raw <- first_or(entry$category, NA_character_)
+    category <- as.character(category_raw)[[1]]
+    if (is.na(category)) category <- NA_character_
+    category <- trimws(category)
+    if (is.na(category) || !nzchar(category)) {
+      rlang::warn(sprintf("Dropping geneset entry %s with missing category", idx))
+      return(tibble::tibble())
+    }
+
+    subcategory_raw <- first_or(entry$subcategory, "")
+    subcategory <- as.character(subcategory_raw)[[1]]
+    if (is.na(subcategory)) subcategory <- ""
+    subcategory <- trimws(subcategory)
+
+    collapse_raw <- first_or(entry$collapse, FALSE)
+    collapse <- if (is.logical(collapse_raw)) {
+      isTRUE(collapse_raw)
+    } else if (is.numeric(collapse_raw)) {
+      collapse_raw != 0
+    } else if (is.character(collapse_raw)) {
+      tolower(collapse_raw) %in% c("true", "t", "1", "yes")
+    } else {
+      FALSE
+    }
+
+    tibble::tibble(
+      category = category,
+      subcategory = subcategory,
+      collapse = collapse
     )
-  }))
-  return(df)
+  })
+
+  rows <- purrr::discard(rows, ~ nrow(.x) == 0)
+  if (length(rows) == 0) {
+    return(tibble::tibble(
+      category = character(0),
+      subcategory = character(0),
+      collapse = logical(0)
+    ))
+  }
+
+  dplyr::bind_rows(rows)
 }

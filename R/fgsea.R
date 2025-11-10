@@ -46,9 +46,10 @@ filter_on_mainpathway <- function(
     mutate(ratio_main = n_main / n()) %>%
     ungroup()
 
+  # Keep rows where the per-rankname fraction of TRUE mainpathway
+  # meets the provided threshold.
   filtered_pathway_object <- pathway_object %>%
-    dplyr::mutate(main_pathway_ratio = rowSums(!is.na(.))) %>%
-    dplyr::filter(main_pathway_ratio >= main_pathway_ratio)
+    dplyr::filter(ratio_main >= main_pathway_ratio)
 
   return(filtered_pathway_object)
 }
@@ -331,10 +332,21 @@ run_all_rankobjs <- function(
   # )
 
   if (!is.null(cache) && cache == TRUE) {
-    purrr::walk2(rankobjs, results, ~  # do.call syntax in order to pass multiple args as a list
-      do.call(fgsea_cache_manager, c(list(rankobj = .x, final_result = .y), fgsea_args))
-      # fgsea_cache_manager(.x, fgsea_args,  final_result = .y, save = TRUE)
-    )
+    # Save only successfully computed (non-NULL) results.
+    # Align by name to avoid positional length mismatches when some results are filtered out.
+    if (length(results) > 0) {
+      .common_names <- intersect(names(rankobjs), names(results))
+      if (length(.common_names) > 0) {
+        purrr::walk2(
+          rankobjs[.common_names],
+          results[.common_names],
+          ~ do.call(
+            fgsea_cache_manager,
+            c(list(rankobj = .x, final_result = .y), fgsea_args)
+          )
+        )
+      }
+    }
   }
 
   final_results <- c(
@@ -501,16 +513,28 @@ get_rankorder <- function(
   # if (!"character" %in% class(geneset)){
   #   warning("geneset may be of wrong type")
   #   }
-  if ("data.frame" %in% class(geneset_ids)){
-    warning("geneset is of wrong type, should be the ids list")
-    }
+  # Coerce/validate inputs
+  if (is.data.frame(geneset_ids)) {
+    warning("geneset_ids should be a character vector of IDs; received data.frame")
+  }
+  if (is.list(geneset_ids)) {
+    warning("geneset_ids is a list; using the first element")
+    if (length(geneset_ids) >= 1) geneset_ids <- geneset_ids[[1]]
+  }
+  if (!is.character(geneset_ids)) {
+    geneset_ids <- as.character(geneset_ids)
+  }
 
-  # type checking
-  if ("list" %in% class(rankobj)) {
-   cat("rnkobj is a list")
-   if (length(rnkobj) == 1) rnkobj <- rnkobj[[1]]
-   else warning('should not be a list')
- }
+  # type checking for rankobj
+  if (is.list(rankobj)) {
+    message("rankobj is a list; using the first element")
+    if (length(rankobj) >= 1) {
+      rankobj <- rankobj[[1]]
+    }
+  }
+  if (!is.numeric(rankobj) || is.null(names(rankobj))) {
+    stop("rankobj must be a named numeric vector (names are gene IDs)")
+  }
 
   # browser()
   enplot_data <- plotEnrichmentData(geneset_ids, rankobj)
@@ -602,8 +626,10 @@ get_rankorder_across <- function(
         arrange(pval)
   }
 
-  if (filter_on_mainpathway == TRUE){
-    df <- filter_on_mainpathway(df, main_pathway_ratio >= main_pathway_ratio)
+  if (isTRUE(filter_on_mainpathway)){
+    # Avoid name collision with logical parameter by fetching the function from the parent env
+    filter_on_mainpathway_fn <- get("filter_on_mainpathway", envir = parent.env(environment()), mode = "function")
+    df <- filter_on_mainpathway_fn(df, main_pathway_ratio = main_pathway_ratio)
   }
 
 
@@ -808,14 +834,13 @@ get_rankorder_across <- function(
 
 
 concat_results_one_collection <- function(list_of_dfs, main_pathway_ratio=0.1) {
+  if (length(list_of_dfs) == 0) {
+    return(data.frame())
+  }
   res <- list_of_dfs %>%
-    purrr::imap(
-      .f = ~ {
-        .x %>% dplyr::mutate(rankname = .y)
-      }
-    ) %>%
-    dplyr::bind_rows() %>%
-    filter_on_mainpathway(main_pathway_ratio = main_pathway_ratio)
+    purrr::imap(~ .x %>% dplyr::mutate(rankname = .y)) %>%
+    dplyr::bind_rows()
+  res <- filter_on_mainpathway(res, main_pathway_ratio = main_pathway_ratio)
   return(res)
 }
 
