@@ -344,6 +344,11 @@ clean_args <- function(params, root_dir = "/") {
   } else {
     params$extra$rankname_order <- params$extra$sample_order
   }
+  # think have to do params$pca <- list() and then can do nested assignment
+  # but don't need to do this really anyway
+  # if ((params$pca$do %||% FALSE) ==  TRUE){
+  #   params$pca$extra <- params$extra
+  # }
 
   if (!is.null(params$extra$sample_order)) {
     params$extra$sample_order <- as.character(params$extra$sample_order)
@@ -1065,7 +1070,7 @@ infer_ordered_factor <- function(column) { # this probably doesn't do what you w
     non_numeric_values <- tolower(column[non_numeric_indices])
 
     # Assign special order value for "veh" or "vehicle"
-    is_vehicle <- grepl("^veh$|^vehicle|^ctrl|^dmso$", non_numeric_values, ignore.case = TRUE)
+    is_vehicle <- grepl("^veh$|^vehicle|^ctrl|^dmso|^untreat$", non_numeric_values, ignore.case = TRUE)
     order_values[non_numeric_indices[is_vehicle]] <- min_num - 2 # Highest priority
 
     # Assign next priority to other non-numeric values
