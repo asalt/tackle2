@@ -142,6 +142,10 @@ create_rnkfiles_from_volcano <- function(
       if (value_col %in% colnames(.table)) {
         .table <- .table %>% rename(value = !!value_col)
       }
+      if (tolower(value_col) %in% tolower(colnames(.table))) {
+        .match <- colnames(.table)[ stringr::str_detect(tolower(colnames(.table)), tolower(value_col)) ]
+        .table <- dplyr::rename(.table, value = !!rlang::sym(.match))
+      }
       if (id_col %in% colnames(.table)) {
         .table <- .table %>% rename(id = !!id_col)
       }
@@ -159,7 +163,6 @@ create_rnkfiles_from_volcano <- function(
   } else {
     log_msg(msg = "nas in shorter names, not reassigning")
   }
-
   lst
 }
 
@@ -180,7 +183,7 @@ write_rnkfiles <- function(
         c(dir, paste0(.y, ".rnk"))
       )
       if (!fs::file_exists(.outname)) {
-        if (("GeneID" %in% colnames(.x)) && (!"id" %in% colnames(.x))) .x %<>% rename(id = GeneID)
+        if (("GeneID" %in% colnames(.x)) && (!"id" %in% colnames(.x))) .x %<>% dplyr::rename(id = GeneID)
         .x %>%
           dplyr::select(id, value) %>%
           write_tsv(.outname, col_names = FALSE)
