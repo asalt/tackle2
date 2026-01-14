@@ -232,6 +232,17 @@ class HeatmapGeneConfig(ConfigSection):
     }
 
 
+class WordcloudConfig(ConfigSection):
+    """Pathway wordcloud summary controls (per collection)."""
+
+    __fields__ = {
+        "do": FieldMeta(bool, False, "Render wordcloud summaries per collection."),
+        "padj_cutoff": FieldMeta(float, 0.25, "Adjusted p-value cutoff for including pathways."),
+        "top_n_pathways": FieldMeta(int, 50, "Top-N pathways used to build the wordcloud."),
+        "max_words": FieldMeta(int, 70, "Maximum number of words to draw."),
+    }
+
+
 class PCAConfig(ConfigSection):
     """Principal component analysis plotting controls."""
 
@@ -332,6 +343,18 @@ class AdvancedConfig(ConfigSection):
     }
 
 
+class DbConfig(ConfigSection):
+    """SQLite persistence controls for GSEA outputs."""
+
+    __fields__ = {
+        "enable": FieldMeta(bool, False, "Persist GSEA outputs to SQLite."),
+        "path": FieldMeta(str, "savedir", "SQLite file path (or 'savedir' to place in savedir)."),
+        "write_results": FieldMeta(bool, True, "Store per-comparison GSEA results."),
+        "write_ranks": FieldMeta(bool, False, "Store full rank vectors (can be large)."),
+        "write_pathways": FieldMeta(bool, True, "Store pathway membership metadata."),
+    }
+
+
 class ModelConfig(ConfigSection):
     """Model definition for ranks_from='model'."""
 
@@ -377,11 +400,13 @@ class ParamsConfig(ConfigSection):
         "enplot": EnplotConfig,
         "heatmap_gsea": HeatmapGSEAConfig,
         "heatmap_gene": HeatmapGeneConfig,
+        "wordcloud": WordcloudConfig,
         "pca": PCAConfig,
         "pca_gene": GenePCAConfig,
         "umap_gene": GeneUMAPConfig,
         "extra": ExtraConfig,
         "advanced": AdvancedConfig,
+        "db": DbConfig,
         "model": ModelConfig,
     }
 

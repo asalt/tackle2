@@ -813,6 +813,21 @@ barplot_with_numbers <- function(
     max_label_chars < 84 ~ 6.2,
     TRUE ~ 5.2
   )
+  strip_label_chars <- if ("rankname" %in% names(sel)) {
+    sel$rankname %>% as.character() %>%
+      stringr::str_replace_all("\n", " ") %>%
+      stringr::str_replace_all("_", " ") %>%
+      stringr::str_squish()
+  } else {
+    character(0)
+  }
+  max_strip_chars <- if (length(strip_label_chars) > 0) max(nchar(strip_label_chars)) else 0
+  strip_text_size <- dplyr::case_when(
+    max_strip_chars < 28 ~ 10,
+    max_strip_chars < 48 ~ 9,
+    max_strip_chars < 72 ~ 8,
+    TRUE ~ 7
+  )
 
   # Compute bubble-like fill value: sign(NES) * (1 - pval)
   if (!"pval" %in% colnames(sel)) {
@@ -889,7 +904,7 @@ barplot_with_numbers <- function(
       axis.text.y = element_text(size = axis_text_y_size, face = "bold"),
       axis.text.x = element_text(size = 7.0),
       plot.title = element_text(size = 14, face = "bold", hjust = 0),
-      strip.text.x = element_text(size = 10, face = "bold", hjust = 0.5),
+      strip.text.x = element_text(size = strip_text_size, face = "bold", hjust = 0.5),
       plot.subtitle = element_text(hjust = 0)
     )
 

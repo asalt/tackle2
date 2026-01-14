@@ -27,6 +27,12 @@ glyph = "⁕"
   stroke_width = 0.8
   stroke_alpha = 0.55
 
+[params.wordcloud]
+do = false
+padj_cutoff = 0.25
+top_n_pathways = 50
+max_words = 70
+
 [params.enplot]
 do_individual = true
 do_combined = true
@@ -167,6 +173,13 @@ contrasts = []  # e.g. ["treatDrug - treatControl", "MvF = (treatDrugsexMale + t
 # design = "~ 0 + treat:sex"
 # contrasts = ["treatMale = treatDrugsexMale - treatControlsexMale"]
 # volcano_padj_cutoff = 0.1
+
+[params.db]
+enable = false
+path = "savedir"
+write_results = true
+write_ranks = false
+write_pathways = true
 
 [params.advanced]
 parallel = true

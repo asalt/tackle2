@@ -66,6 +66,7 @@ clean_args <- function(params, root_dir = "/") {
   params$heatmap_gsea <- params$heatmap_gsea %||% list()
   params$heatmap_gene <- params$heatmap_gene %||% list()
   params$enplot <- params$enplot %||% list()
+  params$db <- params$db %||% list()
 
   params$barplot$do_individual <- params$barplot$do_individual %||% TRUE
   params$barplot$do_combined <- params$barplot$do_combined %||% TRUE
@@ -73,6 +74,10 @@ clean_args <- function(params, root_dir = "/") {
   params$bubbleplot$do_combined <- params$bubbleplot$do_combined %||% TRUE
   params$barplot$advanced <- params$barplot$advanced %||% list()
   params$bubbleplot$advanced <- params$bubbleplot$advanced %||% list()
+  params$db$enable <- params$db$enable %||% FALSE
+  params$db$write_results <- params$db$write_results %||% TRUE
+  params$db$write_ranks <- params$db$write_ranks %||% FALSE
+  params$db$write_pathways <- params$db$write_pathways %||% TRUE
 
   default_limit_values <- c(10, 20, 30, 50)
   params$barplot$limit <- normalize_limit_vector(params$barplot$limit, default_limit_values)
@@ -320,6 +325,16 @@ clean_args <- function(params, root_dir = "/") {
     }
   }
   params$advanced$cachedir <- cachedir
+
+  db_path <- params$db$path %||% "savedir"
+  if (!is.null(db_path)) {
+    if (db_path == "savedir" || db_path == "") {
+      db_path <- file.path(params$savedir, "gsea_results.sqlite")
+    } else {
+      db_path <- file.path(root_dir, db_path)
+    }
+  }
+  params$db$path <- db_path
 
 
   # this block could be cleaned up

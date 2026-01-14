@@ -135,6 +135,13 @@ Generated limma summaries and volcano PDFs are stored under `savedir/model/<type
 - `point_type` (string, default `"gene"`): Choose `"gene"` to embed genes or `"sample"` to embed samples.
 - `rank_name` (string, default `""`): When `point_type` is `"gene"`, colour genes by the specified rank/comparison (requires matching `.rnk` data).
 
+## params.wordcloud
+
+- `do` (bool, default `false`): Enable per-collection pathway wordcloud summaries from GSEA results.
+- `padj_cutoff` (float, default `0.25`): Adjusted p-value threshold; only pathways with `padj <= padj_cutoff` contribute tokens.
+- `top_n_pathways` (int, default `50`): Number of pathways (per collection) used to build the wordcloud; sorted by `abs(NES) * -log10(pval)`.
+- `max_words` (int, default `70`): Maximum number of distinct words drawn, ordered by aggregated weight.
+
 ## params.extra
 
 - `rankname_order` (array of strings): Explicit left-to-right order for rank names (comparisons). When present, every plot that displays comparisons (combined barplots, bubbleplots, GSEA heatmaps, PCA heatmaps, etc.) will honour this sequence after intersecting it with the ranks that were actually generated. A single value of `"sample_order"` is treated as an alias for the `sample_order` vector.

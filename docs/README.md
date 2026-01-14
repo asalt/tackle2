@@ -105,6 +105,21 @@ command line interface is here:
   - API hosting
   - results storage in db
 
+### Python geneset API
+
+The `tackle2` python package now exposes the existing R `geneset_utils` helpers via `rpy2`. Import `get_geneset_collections` to pull msigdbr data frames directly from python without invoking the CLI:
+
+```
+from tackle2 import get_geneset_collections, geneset_membership
+
+hallmark = get_geneset_collections([
+    {"category": "H", "subcategory": "", "collapse": False},
+])
+gene_lists = geneset_membership(hallmark["H_"])
+```
+
+Collections are returned as `pandas.DataFrame` objects, and `geneset_membership` collapses any collection into `{geneset_name: [genes...]}` dictionaries using the same R implementation the pipeline relies on.
+
 
 test everything with test.sh (no .bat file yet)
 python testing with `pytest ./python/tests/`

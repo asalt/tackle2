@@ -20,6 +20,7 @@ import pandas as pd
 
 from . import export_packager
 from . import config_schema
+from . import config_doctor
 from .report.generator import ReportGenerationError, generate_report, serve_directory
 from .report.llm import OllamaConfig, OllamaSummarizer
 
@@ -102,6 +103,99 @@ def get_config(name, include_colormap, colormap_name):
 
     if copied_any:
         click.echo("done")
+
+
+@main.command("config-doctor")
+@click.option(
+    "-c",
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="TOML configuration file to inspect.",
+)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(dir_okay=False, path_type=Path),
+    help="Output TOML file (default: add .doctor.toml to the config name).",
+)
+@click.option("--in-place", is_flag=True, help="Append updates directly to the input file.")
+@click.option("--dry-run", is_flag=True, help="Report missing values without writing output.")
+@click.option("--check", is_flag=True, help="Alias for --dry-run.")
+@click.option(
+    "--append-missing-keys/--skip-missing-keys",
+    default=True,
+    show_default=True,
+    help="Append missing keys for existing sections (reopens tables at the end).",
+)
+@click.option(
+    "--include-arrays",
+    is_flag=True,
+    help="Append defaults for array-of-table fields (e.g., genesets) when missing.",
+)
+@click.option("--stdout", "write_stdout", is_flag=True, help="Write updated TOML to stdout.")
+def config_doctor_cmd(
+    config_path: Path,
+    output: Path | None,
+    in_place: bool,
+    dry_run: bool,
+    check: bool,
+    append_missing_keys: bool,
+    include_arrays: bool,
+    write_stdout: bool,
+):
+    """Check a TOML config and append missing sections to a doctor file."""
+
+    if in_place and output is not None:
+        raise click.UsageError("Use --in-place or --output, not both.")
+
+    dry_run = dry_run or check
+    sections = config_doctor.collect_section_info()
+    config_data = config_doctor.load_toml(config_path)
+    report = config_doctor.inspect_config(config_data, sections)
+    plan = config_doctor.build_append_plan(
+        report,
+        sections,
+        append_missing_keys=append_missing_keys,
+        include_arrays=include_arrays,
+    )
+    click.echo(
+        config_doctor.format_report(
+            config_path,
+            report,
+            plan,
+            append_missing_keys=append_missing_keys,
+            include_arrays=include_arrays,
+        )
+    )
+
+    if dry_run:
+        return
+
+    if write_stdout:
+        updated = config_doctor.append_blocks(config_path.read_text(), plan.blocks)
+        click.echo(updated)
+        return
+
+    if in_place:
+        output_path = config_path
+    else:
+        if output is None:
+            if config_path.name.endswith(".toml"):
+                output_path = config_path.with_name(f"{config_path.stem}.doctor.toml")
+            else:
+                output_path = config_path.with_name(f"{config_path.name}.doctor.toml")
+        else:
+            output_path = output
+
+    if not plan.blocks:
+        click.echo("No sections to append; no output written.")
+        return
+
+    updated = config_doctor.append_blocks(config_path.read_text(), plan.blocks)
+    output_path.write_text(updated)
+    click.echo(f"Wrote {output_path}")
 
 
 @main.command()

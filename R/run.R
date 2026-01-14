@@ -37,6 +37,7 @@ run <- function(params) {
   pca_tools <- get_tool_env("pca")
   umap_tools <- get_tool_env("umap")
   voice_tools <- get_tool_env("voice")
+  db_tools <- get_tool_env("db")
 
   # io_tools <- new.env()
   # source(file.path(here("R"), "io.R"), local = io_tools)
@@ -109,6 +110,48 @@ run <- function(params) {
   # ==
   ranks_list <- io_tools$load_and_process_ranks(params)
   # =======
+
+  db_cfg <- params$db %||% list()
+  db_enabled <- isTRUE(db_cfg$enable)
+  if (db_enabled) {
+    log_msg(info = paste0("db enabled: ", db_cfg$path))
+    tryCatch(
+      {
+        db_tools$initialize_db(db_path = db_cfg$path)
+      },
+      error = function(e) {
+        log_msg(warning = paste0("db init failed: ", conditionMessage(e)))
+        db_enabled <<- FALSE
+      }
+    )
+  }
+
+  if (db_enabled && isTRUE(db_cfg$write_ranks)) {
+    con <- NULL
+    tryCatch(
+      {
+        con <- db_tools$get_con(db_cfg$path)
+        purrr::imap(ranks_list, ~ {
+          rank_name <- .y
+          rank_data <- .x
+          tryCatch(
+            {
+              db_tools$insert_ranks(con = con, rankobj_name = rank_name, ranks_data = rank_data)
+            },
+            error = function(e) {
+              log_msg(warning = paste0("db ranks insert failed for ", rank_name, ": ", conditionMessage(e)))
+            }
+          )
+        })
+      },
+      error = function(e) {
+        log_msg(warning = paste0("db ranks write failed: ", conditionMessage(e)))
+      },
+      finally = {
+        if (!is.null(con)) db_tools$close_con(con)
+      }
+    )
+  }
 
   # == run fgsea
 
@@ -241,6 +284,73 @@ run <- function(params) {
       all_gsea_results <- fgsea_tools$concat_results_all_collections(results_list)
       # all_gsea_results %>% saveRDS(file = file.path(savedir, 'allgsearesults.RDS'))
 
+      if (db_enabled) {
+        con <- NULL
+        tryCatch(
+          {
+            con <- db_tools$get_con(db_cfg$path)
+            if (isTRUE(db_cfg$write_pathways) && length(genesets_list_of_lists) > 0) {
+              purrr::imap(genesets_list_of_lists, ~ {
+                collection_name <- .y
+                geneset_list <- .x
+                collection_id <- suppressWarnings(db_tools$insert_collection(con, collection_name))
+                purrr::imap(geneset_list, ~ {
+                  pathway_name <- .y
+                  members <- .x
+                  tryCatch(
+                    {
+                      suppressWarnings(
+                        db_tools$insert_pathway(
+                          con,
+                          collection_id = collection_id,
+                          collection_name = collection_name,
+                          pathway_name = pathway_name,
+                          members = members
+                        )
+                      )
+                    },
+                    error = function(e) {
+                      log_msg(warning = paste0("db pathway insert failed for ", pathway_name, ": ", conditionMessage(e)))
+                    }
+                  )
+                })
+              })
+            }
+
+            if (isTRUE(db_cfg$write_results)) {
+              purrr::imap(results_list, ~ {
+                collection_name <- .y
+                comparison_list <- .x
+                purrr::imap(comparison_list, ~ {
+                  rank_name <- .y
+                  result_df <- .x
+                  if (!is.data.frame(result_df) || nrow(result_df) == 0) return(NULL)
+                  tryCatch(
+                    {
+                      db_tools$insert_results(
+                        con,
+                        rank_name = rank_name,
+                        collection_name = collection_name,
+                        results = result_df
+                      )
+                    },
+                    error = function(e) {
+                      log_msg(warning = paste0("db results insert failed for ", collection_name, " / ", rank_name, ": ", conditionMessage(e)))
+                    }
+                  )
+                })
+              })
+            }
+          },
+          error = function(e) {
+            log_msg(warning = paste0("db write failed: ", conditionMessage(e)))
+          },
+          finally = {
+            if (!is.null(con)) db_tools$close_con(con)
+          }
+        )
+      }
+
 
       # ======= save
 
@@ -342,6 +452,7 @@ run <- function(params) {
 
       # now plot
       plot_tools <- get_tool_env("plot")
+      wordcloud_tools <- get_tool_env("plot_wordcloud")
 
       # =======  barplots
       if (params$barplot$do_individual == TRUE) {
@@ -415,6 +526,74 @@ run <- function(params) {
         if (is.null(bubble_combined_result)) {
           log_msg(msg = "bubble combined plots returned NULL")
         }
+      }
+
+      # ======= per-collection wordcloud summaries
+      if (!is.null(params$wordcloud) && isTRUE(params$wordcloud$do)) {
+        log_msg(msg = paste0(
+          "plotting wordcloud summaries per collection (padj_cutoff=",
+          params$wordcloud$padj_cutoff %||% 0.25,
+          ", top_n_pathways=",
+          params$wordcloud$top_n_pathways %||% 50,
+          ", max_words=",
+          params$wordcloud$max_words %||% 70,
+          ")"
+        ))
+
+        purrr::imap(all_gsea_results_for_plots, ~ {
+          collection_name <- .y
+          fgsea_res_list <- .x
+
+          res_c <- tryCatch(
+            {
+              fgsea_tools$concat_results_one_collection(fgsea_res_list)
+            },
+            error = function(e) {
+              log_msg(warning = paste0(
+                "wordcloud: concat failed for collection ", collection_name, ": ",
+                conditionMessage(e)
+              ))
+              NULL
+            }
+          )
+
+          if (is.null(res_c) || nrow(res_c) == 0) {
+            log_msg(info = paste0(
+              "wordcloud: no rows available for collection ", collection_name, "; skipping"
+            ))
+            return(NULL)
+          }
+
+          collection_dir <- util_tools$safe_path_component(collection_name)
+          wc_savedir <- util_tools$safe_subdir(
+            get_arg(save_func, "path"),
+            collection_dir,
+            "wordcloud"
+          )
+          wc_filename <- util_tools$safe_filename(
+            get_arg(save_func, "filename"),
+            "wordcloud",
+            fallback = "wordcloud"
+          )
+
+          wc_save_func <- make_partial(
+            save_func,
+            path = wc_savedir,
+            filename = wc_filename
+          )
+
+          suppressWarnings({
+            wordcloud_tools$wordcloud_plot(
+              res_c,
+              title = collection_name,
+              subtitle = "pathway theme summary",
+              padj_cutoff = params$wordcloud$padj_cutoff %||% 0.25,
+              top_n_pathways = params$wordcloud$top_n_pathways %||% 50,
+              max_words = params$wordcloud$max_words %||% 70,
+              save_func = wc_save_func
+            )
+          })
+        })
       }
 
 

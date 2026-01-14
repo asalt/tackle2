@@ -58,8 +58,23 @@ insert_collection <- function(con, collection_name){
     return(res$collection_id[1])
 }
 
-get_pathway_id <- function(con, pathway_name){
-    res <- dbGetQuery(con, 'select pathway_id from Pathways where name = ?', params = pathway_name)
+get_pathway_id <- function(con, pathway_name, collection_id = NULL, collection_name = NULL){
+    if (is.null(pathway_name)) return(NULL)
+    if (is.null(collection_id) && !is.null(collection_name)) {
+      res <- dbGetQuery(con, 'select collection_id from Collections where name = ?', params = collection_name)
+      if (nrow(res) > 0) {
+        collection_id <- res$collection_id[1]
+      }
+    }
+    if (!is.null(collection_id)) {
+      res <- dbGetQuery(
+        con,
+        'select pathway_id from Pathways where name = ? and collection_id = ? LIMIT 1',
+        params = list(pathway_name, collection_id)
+      )
+    } else {
+      res <- dbGetQuery(con, 'select pathway_id from Pathways where name = ? LIMIT 1', params = pathway_name)
+    }
     if (nrow(res) == 0) return(NULL)
     return(res$pathway_id[1])
 }
@@ -70,13 +85,6 @@ insert_pathway <- function(con, collection_id = NULL, collection_name = NULL, pa
     if (is.null(pathway_name)) pathway_name <- "empty"
     if (is.null(members)) members <- ""
 
-    maybe_pathway_id <- get_pathway_id(con, pathway_name)
-
-    if (!is.null(maybe_pathway_id)) {
-        warning(paste0("pathway ", pathway_name, " already present in db"))
-        return()
-    }
-
     if (is.null(collection_id) && !is.null(collection_name)){
       res <- dbGetQuery(con, 'select collection_id from Collections where name = ?', params = collection_name)
       if (nrow(res) == 0){ # then create
@@ -86,11 +94,18 @@ insert_pathway <- function(con, collection_id = NULL, collection_name = NULL, pa
       }
     }
 
+    maybe_pathway_id <- get_pathway_id(con, pathway_name, collection_id = collection_id, collection_name = collection_name)
+
+    if (!is.null(maybe_pathway_id)) {
+        warning(paste0("pathway ", pathway_name, " already present in db"))
+        return()
+    }
+
     dbExecute(con, "INSERT INTO Pathways (name, ids, id_type, collection_id) VALUES (?, ?, ?, ?)",
      params = c(pathway_name, str_c(members, collapse='/'), id_type, collection_id)
     )
 
-    pathway_id <- get_pathway_id(con, pathway_name)
+    pathway_id <- get_pathway_id(con, pathway_name, collection_id = collection_id, collection_name = collection_name)
     return(pathway_id)
 
 }
@@ -131,14 +146,45 @@ insert_results <- function(con, rankobj_id = NULL, rank_name = NULL, collection_
     message("Transaction rolled back due to an error.")
   }, add = TRUE)
 
+  col_or_default <- function(df, cols, default_val = NA) {
+    for (col in cols) {
+      if (col %in% colnames(df)) return(df[[col]])
+    }
+    rep(default_val, nrow(df))
+  }
+  normalize_numeric <- function(x) {
+    if (is.list(x)) {
+      x <- vapply(x, function(val) as.numeric(val)[1], numeric(1), USE.NAMES = FALSE)
+    }
+    suppressWarnings(as.numeric(x))
+  }
+
+  pathway_vals <- as.character(col_or_default(results, c("pathway"), ""))
+  pval_vals <- normalize_numeric(col_or_default(results, c("pval", "PVAL"), NA_real_))
+  padj_vals <- normalize_numeric(col_or_default(results, c("padj", "PADJ"), NA_real_))
+  log2err_vals <- normalize_numeric(col_or_default(results, c("log2err", "LOG2ERR"), NA_real_))
+  es_vals <- normalize_numeric(col_or_default(results, c("es", "ES"), NA_real_))
+  nes_vals <- normalize_numeric(col_or_default(results, c("nes", "NES"), NA_real_))
+  size_vals <- suppressWarnings(as.integer(col_or_default(results, c("size", "SIZE"), NA_integer_)))
+  main_vals <- col_or_default(results, c("mainpathway", "main_pathway", "mainPathway"), NA)
+  if (is.list(main_vals)) {
+    main_vals <- vapply(main_vals, function(val) as.logical(val)[1], logical(1), USE.NAMES = FALSE)
+  }
+  main_vals <- suppressWarnings(as.integer(as.logical(main_vals)))
+  leading_vals <- col_or_default(results, c("leadingEdge", "leading_edge", "leadingedge"), "")
+  if (is.list(leading_vals)) {
+    leading_vals <- vapply(leading_vals, function(val) paste(val, collapse = "/"), character(1), USE.NAMES = FALSE)
+  }
+  leading_vals <- as.character(leading_vals)
+
   dbBegin(con)
   stmt <- dbSendStatement(
     con,
     "INSERT OR REPLACE INTO CollectionResults (rankobj_id, collection_id, pathway_id, pathway, pval, padj, log2err, es, nes, size, leadingEdge, mainpathway) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   )
   for (i in seq_len(nrow(results))) {
-    pathway_name <- results$pathway[i]
-    pathway_id <- get_pathway_id(con, pathway_name)
+    pathway_name <- pathway_vals[i]
+    pathway_id <- get_pathway_id(con, pathway_name, collection_id = collection_id)
     if (is.null(pathway_id)) {
       pathway_id <- insert_pathway(con, collection_id = collection_id, pathway_name = pathway_name)
     }
@@ -148,14 +194,14 @@ insert_results <- function(con, rankobj_id = NULL, rank_name = NULL, collection_
         collection_id,
         pathway_id,
         pathway_name,
-        results$pval[i],
-        results$padj[i],
-        results$log2err[i],
-        results$es[i],
-        results$nes[i],
-        results$size[i],
-        results$leadingEdge[i],
-        as.integer(results$mainpathway[i])
+        pval_vals[i],
+        padj_vals[i],
+        log2err_vals[i],
+        es_vals[i],
+        nes_vals[i],
+        size_vals[i],
+        leading_vals[i],
+        main_vals[i]
       )
     )
     if (i %% 1000 == 0) cat("Inserted row", i, "\n")
@@ -230,6 +276,8 @@ insert_curve <- function(
   rankobj_name = NULL,
   pathway_id = NULL,
   pathway_name = NULL,
+  collection_id = NULL,
+  collection_name = NULL,
   curve_data = NULL
 ){
 
@@ -256,14 +304,11 @@ insert_curve <- function(
 
   # get collection id if not provided but name is
   if (is.null(pathway_id)) {
-      sql <- "SELECT pathway_id from Pathways where name = ? LIMIT 1"
-      res <- dbGetQuery(con, sql, params = pathway_name)
-      if (nrow(res) == 0){
+      pathway_id <- get_pathway_id(con, pathway_name, collection_id = collection_id, collection_name = collection_name)
+      if (is.null(pathway_id)){
         warning("no pathway id found, ")
         log_msg(warning="no pathway id found, ")
         return()
-      } else{
-        pathway_id <- res$pathway_id[1]
       }
   }
 

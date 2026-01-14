@@ -30,3 +30,6 @@ Rplots.pdf
 
 # logs
 *.log
+
+
+R/savedir/
