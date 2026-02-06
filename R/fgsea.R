@@ -31,6 +31,11 @@ log_msg <- util_tools$make_partial(util_tools$log_msg)
 filter_on_mainpathway <- function(
     pathway_object,
     main_pathway_ratio = .1) {
+  main_pathway_ratio <- as.numeric(main_pathway_ratio[[1]])
+
+  if (!"pathway" %in% colnames(pathway_object)) {
+    stop("pathway column not found in the input data")
+  }
   if (!"rankname" %in% colnames(pathway_object)) {
     stop("rankname column not found in the input data")
   }
@@ -39,19 +44,40 @@ filter_on_mainpathway <- function(
     pathway_object$mainpathway <- TRUE # will simply keep all
   }
 
+  if (is.na(main_pathway_ratio)) {
+    main_pathway_ratio <- 0
+  }
+  if (main_pathway_ratio < 0) main_pathway_ratio <- 0
+  if (main_pathway_ratio > 1) main_pathway_ratio <- 1
 
   pathway_object <- pathway_object %>%
-    group_by(rankname) %>%
-    mutate(n_main = sum(mainpathway == T)) %>%
-    mutate(ratio_main = n_main / n()) %>%
-    ungroup()
+    mutate(mainpathway = as.logical(mainpathway)) %>%
+    mutate(mainpathway = ifelse(is.na(mainpathway), FALSE, mainpathway))
 
-  # Keep rows where the per-rankname fraction of TRUE mainpathway
-  # meets the provided threshold.
-  filtered_pathway_object <- pathway_object %>%
-    dplyr::filter(ratio_main >= main_pathway_ratio)
+  n_ranknames <- dplyr::n_distinct(pathway_object$rankname)
+  if (n_ranknames == 0) {
+    return(pathway_object[0, , drop = FALSE])
+  }
 
-  return(filtered_pathway_object)
+  # Determine which pathways are "main" often enough across all comparisons.
+  # main_pathway_ratio is interpreted as:
+  #   for each pathway, fraction of ranknames where mainpathway==TRUE.
+  pathway_stats <- pathway_object %>%
+    dplyr::distinct(pathway, rankname, mainpathway) %>%
+    dplyr::group_by(pathway) %>%
+    dplyr::summarise(
+      n_main = dplyr::n_distinct(rankname[mainpathway == TRUE]),
+      ratio_main = n_main / .env$n_ranknames,
+      main_pathway_ratio = .env$main_pathway_ratio,
+      .groups = "drop"
+    )
+  pathway_object_stats <- pathway_object %>% dplyr::left_join(pathway_stats, by = "pathway")
+
+  res <- pathway_object_stats %>% dplyr::filter(ratio_main >= .env$main_pathway_ratio) %>%
+      dplyr::select(!c('n_main', 'ratio_main', 'main_pathway_ratio'))
+    #dplyr::filter(mainpathway == TRUE)
+
+  return(res)
 }
 
 #' Select top pathways based on statistical cutoff
@@ -209,10 +235,10 @@ run_one <- function(
       #if ((nrow(n_fail) == 0) | (nperm > nperm_max)) do_run <- FALSE
       #nperm <- nperm * 2
       #}
-      return(fgseaRes)  # Return the result if successful
+      fgseaRes
     },
     error = function(e) {
-      cat("Error in FGSEA: ", e$message, "\n")
+      logger(warning = paste0("Error in FGSEA: ", conditionMessage(e)))
       return(NULL)
     }
   )
@@ -227,7 +253,6 @@ run_one <- function(
 
   fgseaRes$mainpathway <- TRUE
   if (!is.null(collapse) && collapse) {
-    cat("finding main pathways")
     logger(msg = "finding main pathways")
     collapse_results <- fgseaRes %>%
       fgsea::collapsePathways(
@@ -312,7 +337,7 @@ run_all_rankobjs <- function(
         })
       },
       error = function(e){
-        print(paste0('error mapping names to genes, ', e))
+        log_msg(warning = paste0("error mapping gene ids to symbols: ", conditionMessage(e)))
       }
     )
   }
@@ -840,7 +865,29 @@ concat_results_one_collection <- function(list_of_dfs, main_pathway_ratio=0.1) {
   res <- list_of_dfs %>%
     purrr::imap(~ .x %>% dplyr::mutate(rankname = .y)) %>%
     dplyr::bind_rows()
+
   res <- filter_on_mainpathway(res, main_pathway_ratio = main_pathway_ratio)
+
+  known_cols <- c(
+    "pathway",
+    "pval",
+    "padj",
+    "log2err",
+    "ES",
+    "NES",
+    "size",
+    "leadingEdge",
+    "leadingEdge_entrezid",
+    "leadingEdge_genesymbol",
+    "mainpathway",
+    "rankname",
+    "n_main",
+    "ratio_main",
+    "main_pathway_ratio"
+  )
+  known_cols <- intersect(known_cols, names(res))
+  res <- res %>% dplyr::select(dplyr::all_of(known_cols), dplyr::everything())
+
   return(res)
 }
 
@@ -850,7 +897,7 @@ concat_results_all_collections <- function(list_of_lists, main_pathway_ratio = .
   res <- list_of_lists %>%
     purrr::map(
       ~ {
-        concat_results_one_collection(.x)
+        concat_results_one_collection(.x, main_pathway_ratio = main_pathway_ratio)
       }
     )
   return(res)
