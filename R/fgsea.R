@@ -73,11 +73,99 @@ filter_on_mainpathway <- function(
     )
   pathway_object_stats <- pathway_object %>% dplyr::left_join(pathway_stats, by = "pathway")
 
-  res <- pathway_object_stats %>% dplyr::filter(ratio_main >= .env$main_pathway_ratio) %>%
-      dplyr::select(!c('n_main', 'ratio_main', 'main_pathway_ratio'))
-    #dplyr::filter(mainpathway == TRUE)
+  res <- pathway_object_stats %>%
+    dplyr::filter(ratio_main >= .env$main_pathway_ratio) %>%
+    dplyr::select(!c("n_main", "ratio_main", "main_pathway_ratio"))
 
   return(res)
+}
+
+.safe_ratio <- function(numerator, denominator) {
+  numerator <- suppressWarnings(as.numeric(numerator)[1])
+  denominator <- suppressWarnings(as.numeric(denominator)[1])
+  if (is.na(numerator) || is.na(denominator) || denominator == 0) {
+    return(NA_real_)
+  }
+  numerator / denominator
+}
+
+.leading_edge_peak_rank <- function(leading_edge, es_value) {
+  if (is.null(leading_edge)) {
+    return(NA_real_)
+  }
+  edge_ranks <- unlist(leading_edge, use.names = FALSE)
+  edge_ranks <- suppressWarnings(as.integer(edge_ranks))
+  edge_ranks <- edge_ranks[!is.na(edge_ranks)]
+  if (length(edge_ranks) == 0) {
+    return(NA_real_)
+  }
+
+  es_value <- suppressWarnings(as.numeric(es_value)[1])
+  if (is.na(es_value)) {
+    return(NA_real_)
+  }
+
+  if (es_value < 0) {
+    return(as.numeric(min(edge_ranks)))
+  }
+  as.numeric(max(edge_ranks))
+}
+
+add_pathway_shape_metrics <- function(fgsea_res, rankobj) {
+  if (!"data.frame" %in% class(fgsea_res) || nrow(fgsea_res) == 0) {
+    return(fgsea_res)
+  }
+
+  total_ranks <- length(rankobj)
+  metric_cols <- c(
+    "peak_rank_pct",
+    "leading_edge_fraction",
+    "leading_edge_span_pct",
+    "front_loaded_score"
+  )
+
+  if (!"leadingEdge" %in% colnames(fgsea_res) || total_ranks <= 0) {
+    for (col in metric_cols) {
+      fgsea_res[[col]] <- NA_real_
+    }
+    return(fgsea_res)
+  }
+
+  metrics <- purrr::pmap(
+    list(
+      leading_edge = fgsea_res$leadingEdge,
+      es_value = fgsea_res$ES,
+      set_size = fgsea_res$size
+    ),
+    function(leading_edge, es_value, set_size) {
+      edge_ranks <- unlist(leading_edge, use.names = FALSE)
+      edge_ranks <- suppressWarnings(as.integer(edge_ranks))
+      edge_ranks <- edge_ranks[!is.na(edge_ranks)]
+      peak_rank <- .leading_edge_peak_rank(edge_ranks, es_value)
+      peak_rank_pct <- .safe_ratio(peak_rank, total_ranks)
+      leading_edge_fraction <- .safe_ratio(length(edge_ranks), set_size)
+      leading_edge_span_pct <- if (length(edge_ranks) == 0) {
+        NA_real_
+      } else {
+        .safe_ratio(max(edge_ranks) - min(edge_ranks), total_ranks)
+      }
+      front_loaded_score <- if (is.na(peak_rank_pct) || peak_rank_pct <= 0) {
+        NA_real_
+      } else {
+        suppressWarnings(as.numeric(es_value)[1]) / peak_rank_pct
+      }
+
+      data.frame(
+        peak_rank_pct = peak_rank_pct,
+        leading_edge_fraction = leading_edge_fraction,
+        leading_edge_span_pct = leading_edge_span_pct,
+        front_loaded_score = front_loaded_score
+      )
+    }
+  ) %>% dplyr::bind_rows()
+
+  fgsea_res <- fgsea_res %>% dplyr::select(-dplyr::any_of(metric_cols))
+  dplyr::bind_cols(fgsea_res, metrics)
 }
 
 #' Select top pathways based on statistical cutoff
@@ -265,6 +353,8 @@ run_one <- function(
       mainpathway = pathway %in% collapse_results$mainPathways
     )
   } 
+
+  fgseaRes <- add_pathway_shape_metrics(fgseaRes, rankobj)
 
   return(fgseaRes)
 }
@@ -875,6 +965,10 @@ concat_results_one_collection <- function(list_of_dfs, main_pathway_ratio=0.1) {
     "log2err",
     "ES",
     "NES",
+    "peak_rank_pct",
+    "leading_edge_fraction",
+    "leading_edge_span_pct",
+    "front_loaded_score",
     "size",
     "leadingEdge",
     "leadingEdge_entrezid",

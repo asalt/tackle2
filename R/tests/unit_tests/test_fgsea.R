@@ -141,7 +141,7 @@ test_that("test run one collapse", {
   )
 })
 
-test_that("filter_on_mainpathway filters per-pathway across comparisons", {
+test_that("filter_on_mainpathway retains all comparison rows for globally retained pathways", {
   df <- tibble::tibble(
     pathway = c("p1", "p1", "p2", "p2"),
     rankname = c("rank1", "rank2", "rank1", "rank2"),
@@ -149,18 +149,27 @@ test_that("filter_on_mainpathway filters per-pathway across comparisons", {
     mainpathway = c(TRUE, TRUE, TRUE, FALSE)
   )
 
-  # With ratio=1, keep only pathways that are main in 100% of ranknames.
+  # With ratio=1, keep only pathways that are main in 100% of comparisons.
+  # p2 is excluded entirely because it is not a main pathway in rank2.
   filtered_strict <- fgsea_tools$filter_on_mainpathway(df, main_pathway_ratio = 1)
   testthat::expect_true(all(filtered_strict$pathway == "p1"))
   testthat::expect_equal(sort(unique(filtered_strict$rankname)), c("rank1", "rank2"))
   testthat::expect_true(all(filtered_strict$mainpathway))
 
-  # With ratio=0.1, keep any pathway that is main in >=10% of ranknames,
-  # but only retain rows where mainpathway==TRUE.
+  # With ratio=0.1, p2 is retained because it is a main pathway in 1/2 comparisons.
+  # Once a pathway is retained, we intentionally keep *all* of its comparison rows,
+  # including rows where mainpathway == FALSE in a specific comparison.
   filtered_loose <- fgsea_tools$filter_on_mainpathway(df, main_pathway_ratio = 0.1)
-  testthat::expect_true(all(filtered_loose$mainpathway))
-  testthat::expect_true(all(c("p1", "p2") %in% unique(filtered_loose$pathway)))
-  testthat::expect_true(!any(filtered_loose$pathway == "p2" & filtered_loose$rankname == "rank2"))
+  testthat::expect_equal(sort(unique(filtered_loose$pathway)), c("p1", "p2"))
+  testthat::expect_equal(
+    filtered_loose %>%
+      dplyr::filter(pathway == "p2") %>%
+      dplyr::arrange(rankname) %>%
+      dplyr::pull(rankname),
+    c("rank1", "rank2")
+  )
+  testthat::expect_true(any(filtered_loose$pathway == "p2" & filtered_loose$mainpathway == FALSE))
+  testthat::expect_equal(nrow(filtered_loose), 4)
 })
 
 
