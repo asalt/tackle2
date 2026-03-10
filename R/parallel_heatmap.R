@@ -44,7 +44,7 @@ run_multisession_jobs <- function(
     job_fn,
     workers = NULL,
     packages = NULL,
-    globals = list(),
+    globals = TRUE,
     stop_on_error = FALSE,
     reserve = 1L,
     seed = TRUE) {

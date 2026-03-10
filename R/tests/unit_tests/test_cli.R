@@ -23,6 +23,17 @@ test_that("argument parser works", {
   file.create(temp_file)
   args <- parse_args(parser, c(temp_file))
   expect_equal(args$config, temp_file)
+
+  args_quiet <- parse_args(parser, c("--quiet", temp_file))
+  expect_true(isTRUE(args_quiet$quiet))
+  expect_false(isTRUE(args_quiet$verbose))
+
+  args_verbose <- parse_args(parser, c("--verbose", temp_file))
+  expect_true(isTRUE(args_verbose$verbose))
+  expect_false(isTRUE(args_verbose$quiet))
+
+  args_level <- parse_args(parser, c("--loglevel", "DEBUG", temp_file))
+  expect_equal(args_level$loglevel, "DEBUG")
 })
 
 

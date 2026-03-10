@@ -11,6 +11,26 @@ pkg_option_name <- function(suffix) {
   paste0(APP_NAME, "_", suffix)
 }
 
+normalize_bool <- function(x, default = FALSE) {
+  if (is.null(x) || length(x) == 0) return(default)
+  x <- x[[1]]
+  if (is.logical(x)) return(isTRUE(x))
+  if (is.numeric(x)) return(!is.na(x) && x != 0)
+  if (is.character(x)) {
+    val <- tolower(trimws(x[[1]]))
+    return(val %in% c("true", "t", "1", "yes", "y"))
+  }
+  default
+}
+
+is_quiet <- function(default = FALSE) {
+  normalize_bool(getOption(pkg_option_name("quiet"), default), default = default)
+}
+
+is_verbose <- function(default = TRUE) {
+  normalize_bool(getOption(pkg_option_name("verbose"), default), default = default)
+}
+
 source(file.path(here("R"), "lazyloader.R"))
 # listen_tools <- get_tool_env("listen.R")
 # util_tools <- get_tool_env("utils")
@@ -54,13 +74,37 @@ clean_args <- function(params, root_dir = "/") {
   # this doesn't work-
   # params <- prepend_root_dir(params, root_dir)
 
+  params$advanced <- params$advanced %||% list()
+  params$extra <- params$extra %||% list()
+  params$pca <- params$pca %||% list()
+
   if (is.null(params$savedir)) {
     params$savedir <- file.path("./plots")
   }
   params$savedir <- file.path(root_dir, (params$savedir %||% file.path("./plots")))
 
+  params$advanced$quiet <- normalize_bool(params$advanced$quiet %||% FALSE)
+  if (!is.null(params$advanced$verbose)) {
+    params$advanced$verbose <- normalize_bool(params$advanced$verbose)
+    params$advanced$quiet <- !params$advanced$verbose
+  } else {
+    params$advanced$verbose <- !params$advanced$quiet
+  }
+
+  options(structure(list(params$advanced$quiet), names = pkg_option_name("quiet")))
+  options(structure(list(params$advanced$verbose), names = pkg_option_name("verbose")))
+
+  if (is.null(params$advanced$loglevel) || !nzchar(params$advanced$loglevel)) {
+    params$advanced$loglevel <- if (isTRUE(params$advanced$verbose)) "DEBUG" else "INFO"
+  }
+  params$advanced$loglevel <- toupper(params$advanced$loglevel)
+  options(structure(list(params$advanced$loglevel), names = pkg_option_name("loglevel")))
+
+  logfile <- params$advanced$logfile %||% file.path(params$savedir, "run.log")
+  options(structure(list(logfile), names = pkg_option_name("log_msg_filename")))
+  params$advanced$logfile <- logfile
+
   # all top level params
-  params$advanced <- params$advanced %||% list()
   params$barplot <- params$barplot %||% list()
   params$bubbleplot <- params$bubbleplot %||% list()
   params$heatmap_gsea <- params$heatmap_gsea %||% list()
@@ -68,10 +112,10 @@ clean_args <- function(params, root_dir = "/") {
   params$enplot <- params$enplot %||% list()
   params$db <- params$db %||% list()
 
-  params$barplot$do_individual <- params$barplot$do_individual %||% TRUE
-  params$barplot$do_combined <- params$barplot$do_combined %||% TRUE
-  params$bubbleplot$do_individual <- params$bubbleplot$do_individual %||% TRUE
-  params$bubbleplot$do_combined <- params$bubbleplot$do_combined %||% TRUE
+  params$barplot$do_individual <- normalize_bool(params$barplot$do_individual, default = TRUE)
+  params$barplot$do_combined <- normalize_bool(params$barplot$do_combined, default = TRUE)
+  params$bubbleplot$do_individual <- normalize_bool(params$bubbleplot$do_individual, default = TRUE)
+  params$bubbleplot$do_combined <- normalize_bool(params$bubbleplot$do_combined, default = TRUE)
   params$barplot$advanced <- params$barplot$advanced %||% list()
   params$bubbleplot$advanced <- params$bubbleplot$advanced %||% list()
   params$db$enable <- params$db$enable %||% FALSE
@@ -84,9 +128,12 @@ clean_args <- function(params, root_dir = "/") {
   params$bubbleplot$limit <- normalize_limit_vector(params$bubbleplot$limit, params$barplot$limit)
   params$bubbleplot$glyph <- params$bubbleplot$glyph %||% "⁕"
 
-  params$heatmap_gsea$do <- params$heatmap_gsea$do %||% TRUE
-  params$heatmap_gene$do <- params$heatmap_gene$do %||% TRUE
-  params$pca$do <- params$pca$do %||% TRUE
+  params$heatmap_gsea$do <- normalize_bool(params$heatmap_gsea$do, default = TRUE)
+  params$heatmap_gene$do <- normalize_bool(params$heatmap_gene$do, default = TRUE)
+  params$pca$do <- normalize_bool(params$pca$do, default = TRUE)
+  params$enplot$do <- normalize_bool(params$enplot$do, default = TRUE)
+  params$enplot$do_individual <- normalize_bool(params$enplot$do_individual, default = params$enplot$do)
+  params$enplot$do_combined <- normalize_bool(params$enplot$do_combined, default = params$enplot$do)
   params$pca_gene <- params$pca_gene %||% list()
   params$pca_gene$do <- params$pca_gene$do %||% FALSE
   params$pca_gene$components <- params$pca_gene$components %||% 3
@@ -385,19 +432,12 @@ clean_args <- function(params, root_dir = "/") {
 
   params$genesets <- params$genesets %||% list(list(category = "H", subcategory = "", collapse = FALSE))
 
-  params$advanced$quiet <- params$advanced$quiet %||% FALSE
-
   params$advanced$parallel <- params$advanced$parallel %||% FALSE
   params$advanced$exclude_samples_from_data <- params$advanced$exclude_samples_from_data %||% FALSE
 
-  logfile <- params$advanced$logfile %||% file.path(params$savedir, "run.log")
-  # browser()
-  loglevel <- params$advanced$loglevel
-  options(structure(list(logfile), names = pkg_option_name("log_msg_filename")))
-  options(structure(list(loglevel), names = pkg_option_name("loglevel")))
-  params$advanced$logfile <- logfile
-
-  print(str(params))
+  if (is_verbose() && identical(params$advanced$loglevel, "DEBUG")) {
+    print(str(params))
+  }
 
   # Optional user-provided color map file (CSV/TSV) for categorical annotations
   # Recognized keys: params$extra$colormap_file, params$extra$cmap_file,
@@ -1151,20 +1191,25 @@ dist_no_na <- function(mat) {
 scale_gct <- function(gct, group_by = NULL) {
   log_msg(msg = "zscoring gct file by row")
   log_msg(msg = paste0("group_by is set to: ", group_by))
-  if (!is.null(group_by) && length(group_by) == 1 && group_by == FALSE) group_by <- NULL
+  if (is.logical(group_by) && length(group_by) == 1 && (isFALSE(group_by) || is.na(group_by))) {
+    group_by <- NULL
+  }
+  if (is.character(group_by) && length(group_by) == 1 && is.na(group_by)) {
+    group_by <- NULL
+  }
   group_cols <- group_by # this is a hack to get around the fact that group_by is a dplyr function
   res <- gct %>%
     melt_gct() # %>%
   # Conditionally add group_by
   if (!is.null(group_cols)) {
     if (length(group_cols) == 1) {
-      res <- group_by(res, id.x, !!sym(group_cols))
+      res <- dplyr::group_by(res, id.x, !!rlang::sym(group_cols))
     }
     if (length(group_cols) > 1) {
-      res <- group_by(res, id.x, across(all_of(group_cols)))
+      res <- dplyr::group_by(res, id.x, dplyr::across(dplyr::all_of(group_cols)))
     }
   } else {
-    res <- group_by(res, id.x)
+    res <- dplyr::group_by(res, id.x)
   }
 
   res <- res %>%
@@ -1296,10 +1341,11 @@ make_partial <- function(.f, ...) {
 )
 
 
-
-globalloglevel <- options(pkg_option_name("loglevel"))[[1]] %||% "INFO"
-
-log_msg <- function(msg = NULL, info = NULL, debug = NULL, warning = NULL, warn = NULL, error = NULL, filename = NULL, end = "\n", shell = T, loglevel = loglevel, send_over_socket = TRUE, socket_port = 8765, ...) {
+log_msg <- function(msg = NULL, info = NULL, debug = NULL, warning = NULL, warn = NULL, error = NULL, filename = NULL, end = "\n", shell = !is_quiet(), loglevel = NULL, send_over_socket = TRUE, socket_port = 8765, ...) {
+  globalloglevel <- toupper(loglevel %||% getOption(pkg_option_name("loglevel"), "INFO"))
+  if (!globalloglevel %in% names(.log_levels)) {
+    globalloglevel <- "INFO"
+  }
   level <- dplyr::case_when(
     !is.null(msg) ~ "INFO",
     !is.null(info) ~ "INFO",
@@ -1324,12 +1370,13 @@ log_msg <- function(msg = NULL, info = NULL, debug = NULL, warning = NULL, warn 
 
   prefix <- paste0(format(Sys.time(), "[%Y-%m-%d %H:%M:%S] "), level, ": ")
 
-  maybe_filename <- options(pkg_option_name("log_msg_filename"))[[1]]
-  if (!is.null(maybe_filename)) {
-    filename <- maybe_filename[[1]]
-  }
-  if (is.null(filename)) {
-    filename <- paste0(APP_NAME, ".log")
+  if (is.null(filename) || !nzchar(filename)) {
+    maybe_filename <- getOption(pkg_option_name("log_msg_filename"), NULL)
+    if (!is.null(maybe_filename) && nzchar(maybe_filename)) {
+      filename <- maybe_filename
+    } else {
+      filename <- paste0(APP_NAME, ".log")
+    }
   }
 
   dir_path <- fs::path_dir(filename)
@@ -1348,10 +1395,16 @@ log_msg <- function(msg = NULL, info = NULL, debug = NULL, warning = NULL, warn 
 
 
 process_cut_by <- function(cut_by, cdesc) {
-  #print("***")
-  #print(cut_by)
   # Return NULL immediately if cut_by is NULL
-  if (is.null(cut_by)) {
+  if (is.null(cut_by) || length(cut_by) == 0) {
+    return(NULL)
+  }
+
+  # Treat NA and FALSE as "no cut"
+  if (is.logical(cut_by) && length(cut_by) == 1 && isFALSE(cut_by)) {
+    return(NULL)
+  }
+  if (all(is.na(cut_by))) {
     return(NULL)
   }
 
@@ -1368,6 +1421,13 @@ process_cut_by <- function(cut_by, cdesc) {
     cut_by <- as.character(cut_by)
   }
 
+  # Drop empty/NA values after coercion
+  cut_by <- cut_by[!is.na(cut_by)]
+  cut_by <- cut_by[nzchar(trimws(cut_by))]
+  if (length(cut_by) == 0) {
+    return(NULL)
+  }
+
   # Check if all elements in cut_by are valid column names
   invalid_cols <- setdiff(cut_by, colnames(cdesc))
   if (length(invalid_cols) > 0) {
@@ -1380,9 +1440,6 @@ process_cut_by <- function(cut_by, cdesc) {
 
   # Subset the relevant columns and create the interaction factor
   cut_by_factor <- interaction(cdesc[, cut_by, drop = FALSE], drop = TRUE)
-
-  print("***")
-  print(cut_by_factor)
 
   return(cut_by_factor)
 }

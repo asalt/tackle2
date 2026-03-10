@@ -37,13 +37,11 @@ get_collection_raw <- function(
   collection_id_path <- file.path(cache_dir, collection_id)
 
   if (cache && fs::file_exists(collection_id_path)) {
-    cat(paste0("reading ", collection_id, " from ", cache_dir, "\n"))
     logger(msg = paste0("reading ", collection_id, " from ", cache_dir, "\n"))
-    log_msg(info = paste0("reading ", collection_id, " from ", cache_dir, "\n"))
     df <- readr::read_tsv(collection_id_path, show_col_types = FALSE)
     return(df %>% post_func() )
   }
-  cat(paste0(collection_id, " not found in ", cache_dir, "\n"))
+  logger(msg = paste0(collection_id, " not found in ", cache_dir, "\n"))
 
 
   msig <- function(dbsp) {
@@ -95,7 +93,7 @@ get_collection_raw <- function(
     if (!fs::dir_exists(cache_dir)) fs::dir_create(cache_dir)
     if (!fs::file_exists(collection_id_path)) {
       readr::write_tsv(df, collection_id_path)
-      cat(paste0("writing ", collection_id, " to ", cache_dir, "\n"))
+      logger(msg = paste0("writing ", collection_id, " to ", cache_dir, "\n"))
     }
   }
 

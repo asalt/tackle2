@@ -97,8 +97,14 @@ run <- function(params) {
 
   geneset_tools <- get_tool_env("geneset_utils") # load module
   genesets_of_interest <- geneset_tools$geneset_array_to_df(params$genesets)
-  list_of_geneset_dfs <- geneset_tools$get_collections(genesets_of_interest, species = species)
-  genesets_list_of_lists <- list_of_geneset_dfs %>% purrr::map(geneset_tools$genesets_df_to_list)
+  if (!"collection_name" %in% colnames(genesets_of_interest)) {
+    genesets_of_interest <- genesets_of_interest %>%
+      dplyr::mutate(collection_name = stringr::str_c(category, subcategory, sep = "_"))
+  }
+  genesets_for_iteration <- genesets_of_interest$collection_name %>%
+    as.character() %>%
+    (\(x) x[!is.na(x) & nzchar(x)])() %>%
+    unique()
 
   # =======
 
@@ -243,7 +249,6 @@ run <- function(params) {
 
   # this part is challenging to pass everything in the right format
   fgsea_tools <- get_tool_env("fgsea") # load module
-  genesets_for_iteration <- names(genesets_list_of_lists)
   # we then iterate over the genesets one by one
   # so all results for one get generated before moving to the next
 
@@ -261,11 +266,22 @@ run <- function(params) {
       log_msg(msg = .msg)
       if (params$advanced$quiet != TRUE) voice_tools$speak_text(.x)
 
-      genesets_list_of_lists <- genesets_list_of_lists[.x]
+      collection_spec <- genesets_of_interest %>%
+        dplyr::filter(collection_name == .x) %>%
+        dplyr::slice_head(n = 1)
+      if (nrow(collection_spec) == 0) {
+        log_msg(warning = paste0("No geneset spec found for collection: ", .x, "; skipping"))
+        return(invisible(NULL))
+      }
+
+      list_of_geneset_dfs <- geneset_tools$get_collections(collection_spec, species = species)
+      genesets_list_of_lists <- list_of_geneset_dfs %>%
+        purrr::map(geneset_tools$genesets_df_to_list)
+
       results_list <- fgsea_tools$run_all_pathways(genesets_list_of_lists,
         ranks_list,
         parallel = parallel,
-        genesets_additional_info = genesets_of_interest,
+        genesets_additional_info = collection_spec,
         cache = params$advanced$cache %||% TRUE,
         cache_dir = cachedir,
         logger = log_msg,
@@ -281,6 +297,7 @@ run <- function(params) {
 
       # =======
       log_msg(msg = "combining gsea marices")
+      
       all_gsea_results <- fgsea_tools$concat_results_all_collections(results_list)
       # all_gsea_results %>% saveRDS(file = file.path(savedir, 'allgsearesults.RDS'))
 
@@ -664,7 +681,7 @@ run <- function(params) {
           limit = params$heatmap_gene$limit %||% 10,
           sample_order = params$extra$sample_order,
           cut_by = params$heatmap_gene$cut_by %||% params$cut_by %||% NA,
-          combine_by <- params$heatmap_gene$combine_by %||% params$combine_by %||% NULL,
+          combine_by = params$heatmap_gene$combine_by %||% params$combine_by %||% NULL,
           cluster_rows = params$heatmap_gene$cluster_rows %||% c(FALSE, TRUE),
           cluster_columns = params$heatmap_gene$cluster_columns %||% c(FALSE, TRUE),
           pstat_cutoff = params$heatmap_gene$pstat_cutoff %||% 1,
@@ -715,7 +732,7 @@ run <- function(params) {
                 arrange(facet)
             }
 
-            print(paste0('limit is: ', .enplot_limit))
+            log_msg(debug = paste0("enplot limit: ", .enplot_limit))
             ._ <- plot_tools$plot_top_ES_across(all_gsea_results_for_plots,
               ranks_list = ranks_list_for_plots,
               genesets_list_of_lists,
@@ -737,14 +754,21 @@ run <- function(params) {
         })
       }
 
-
-      if (!is.null(params$enplot$do_individual) && params$enplot$do_individual == TRUE ) {
+      if (isTRUE(params$enplot$do_individual)) {
+        .individual_limit <- params$enplot$limit %||% 10
+        log_msg(msg = paste0(
+          "plotting individual enrichplots (limit=",
+          paste(.individual_limit, collapse = ","),
+          "; replace=",
+          params$advanced$replace %||% TRUE,
+          ")"
+        ))
         ._ <- plot_tools$plot_top_ES_across(all_gsea_results_for_plots,
           ranks_list = ranks_list_for_plots,
           genesets_list_of_lists,
           save_func = save_func,
-          limit = params$enplot$limit %||% 10,
-          do_individual = params$enplot$do_individual,
+          limit = .individual_limit,
+          do_individual = TRUE,
           do_combined = FALSE, # because it is perfromed above in a grid of parameters
           # combine_by = combine_by_df, # this is metadata table rankname and facet if exists
           # combine_by_name = combine_by,
@@ -754,7 +778,9 @@ run <- function(params) {
           # combined_show_ticks = params$enplot$combined_show_ticks %||% FALSE,
           # combined_label_size = params$enplot$combined_label_size %||% 2.05
         )
-    }
+      } else {
+        log_msg(info = "skipping individual enrichplots (params.enplot.do_individual is FALSE)")
+      }
 
     }
   ) # end of purrr::map loop for individual genesets

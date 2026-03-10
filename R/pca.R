@@ -110,8 +110,8 @@ do_one <- function(
   wide_df$pathway <- NULL
   wide_df[is.na(wide_df)] <- 0 #min(wide_df, na.rm = TRUE) # zero because its an NES of zero, not down
 
-  print(colnames(wide_df))
-  print(rownames(metadata))
+  log_msg(debug = paste0("PCA wide_df columns: ", paste(colnames(wide_df), collapse = ", ")))
+  log_msg(debug = paste0("PCA metadata rows: ", paste(head(rownames(metadata), 20), collapse = ", ")))
   pca_res <- wide_df %>% PCAtools::pca(metadata = metadata[colnames(wide_df), ])
 
   return(pca_res)

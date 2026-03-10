@@ -4,6 +4,8 @@ library(DBI)
 library(RSQLite)
 library(stringr)
 
+TESTDB <- tempfile("tackle2-test-", fileext = ".db")
+
 sim_tools <- new.env()
 source(file.path(here("R"), "simulate.R"), local = sim_tools)
 
@@ -19,14 +21,13 @@ source(file.path(here("R"), "fgsea.R"), local = fgsea_tools)
 geneset_tools <- new.env()
 source(file.path(here("R"), "geneset_utils.R"), local = geneset_tools)
 
-TESTDB <- file.path(here("R"), "tests", "test_data", "test.db")
-if (!file.exists("test_data")) dir.create("test_data")
-
 
 testthat::test_that("test db table setup", {
   print(TESTDB)
+  on.exit(if (file.exists(TESTDB)) unlink(TESTDB), add = TRUE)
   db_tools$initialize_db(db_path=TESTDB)
   con <- db_tools$get_con(TESTDB)
+  on.exit(db_tools$close_con(con), add = TRUE)
   res <- dbGetQuery(con, "SELECT * FROM sqlite_master WHERE type='table';")
   for (table in c("Ranks", "RankObjects", "Collections", "Pathways", "CollectionResults", "Curves")){
     expect_true(table %in% res$name, info = table)

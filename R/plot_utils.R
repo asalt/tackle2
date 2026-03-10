@@ -323,10 +323,16 @@ create_named_color_list <- function(df, columns, c=80) {
 
 
 process_cut_by <- function(cut_by, cdesc) {
-  print("***")
-  print(cut_by)
   # Return NULL immediately if cut_by is NULL
-  if (is.null(cut_by)) {
+  if (is.null(cut_by) || length(cut_by) == 0) {
+    return(NULL)
+  }
+
+  # Treat NA and FALSE as "no cut"
+  if (is.logical(cut_by) && length(cut_by) == 1 && isFALSE(cut_by)) {
+    return(NULL)
+  }
+  if (all(is.na(cut_by))) {
     return(NULL)
   }
 
@@ -343,6 +349,13 @@ process_cut_by <- function(cut_by, cdesc) {
     cut_by <- as.character(cut_by)
   }
 
+  # Drop empty/NA values after coercion
+  cut_by <- cut_by[!is.na(cut_by)]
+  cut_by <- cut_by[nzchar(trimws(cut_by))]
+  if (length(cut_by) == 0) {
+    return(NULL)
+  }
+
   # Check if all elements in cut_by are valid column names
   invalid_cols <- setdiff(cut_by, colnames(cdesc))
   if (length(invalid_cols) > 0) {
@@ -355,9 +368,6 @@ process_cut_by <- function(cut_by, cdesc) {
 
   # Subset the relevant columns and create the interaction factor
   cut_by_factor <- interaction(cdesc[, cut_by, drop = FALSE], drop = TRUE)
-
-  print("***")
-  print(cut_by_factor)
 
   return(cut_by_factor)
 }

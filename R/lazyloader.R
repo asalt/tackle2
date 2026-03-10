@@ -14,8 +14,10 @@ if (!exists("get_tool_env", envir = .GlobalEnv)) {
       purrr::list_c() %>%
       str_remove(".R")
 
-    print(getwd())
-    print(all_tools)
+    if (interactive()) {
+      print(getwd())
+      print(all_tools)
+    }
 
     # all_tools <- c("heatmap", "io", "utils")
     #heatmap.R  io.R  lazyloader.R  reduce.R  summarize_rmd.R  utils.R

@@ -39,13 +39,18 @@ test_that("do_one computes PCA correctly with minimal inputs", {
 })
 
 test_that("do_one handles different main_pathway_ratios correctly", {
-  # Test with various ratios
-  n <- 20
-
+  # Make ratios deterministic:
+  # - rank1, rank2: all main pathways (ratio 1.0)
+  # - rank3, rank4: partial main pathways (ratio < 0.95)
   fake_data <- make_fake_gsea(n_pathways = 5, n_ranks = 4)
+  fake_data$mainpathway <- FALSE
+  fake_data$mainpathway[fake_data$rankname %in% c("rank1", "rank2")] <- TRUE
+  fake_data$mainpathway[fake_data$rankname == "rank3" & fake_data$pathway == "path1"] <- TRUE
+  fake_data$mainpathway[fake_data$rankname == "rank4" & fake_data$pathway %in% c("path1", "path2")] <- TRUE
+
   low_ratio_result <- pca_tools$do_one(fake_data, main_pathway_ratio = 0.05)
   high_ratio_result <- pca_tools$do_one(fake_data, main_pathway_ratio = 0.95)
-  expect_true(nrow(low_ratio_result$loadings) <= nrow(high_ratio_result$loading))
+  expect_true(nrow(high_ratio_result$rotated) <= nrow(low_ratio_result$rotated))
 })
 
 

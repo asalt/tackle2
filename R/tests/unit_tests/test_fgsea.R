@@ -141,6 +141,28 @@ test_that("test run one collapse", {
   )
 })
 
+test_that("filter_on_mainpathway filters per-pathway across comparisons", {
+  df <- tibble::tibble(
+    pathway = c("p1", "p1", "p2", "p2"),
+    rankname = c("rank1", "rank2", "rank1", "rank2"),
+    NES = rnorm(4),
+    mainpathway = c(TRUE, TRUE, TRUE, FALSE)
+  )
+
+  # With ratio=1, keep only pathways that are main in 100% of ranknames.
+  filtered_strict <- fgsea_tools$filter_on_mainpathway(df, main_pathway_ratio = 1)
+  testthat::expect_true(all(filtered_strict$pathway == "p1"))
+  testthat::expect_equal(sort(unique(filtered_strict$rankname)), c("rank1", "rank2"))
+  testthat::expect_true(all(filtered_strict$mainpathway))
+
+  # With ratio=0.1, keep any pathway that is main in >=10% of ranknames,
+  # but only retain rows where mainpathway==TRUE.
+  filtered_loose <- fgsea_tools$filter_on_mainpathway(df, main_pathway_ratio = 0.1)
+  testthat::expect_true(all(filtered_loose$mainpathway))
+  testthat::expect_true(all(c("p1", "p2") %in% unique(filtered_loose$pathway)))
+  testthat::expect_true(!any(filtered_loose$pathway == "p2" & filtered_loose$rankname == "rank2"))
+})
+
 
 # ================================ test data ================================
 #

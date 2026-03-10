@@ -1068,8 +1068,11 @@ create_rnkfiles_from_model <- function(
     }
 
     # Fit limma
-    print("Design matrix is :")
-    print(design_matrix)
+    design_preview <- paste(
+      utils::capture.output(print(head(as.data.frame(design_matrix), n = 10))),
+      collapse = "\n"
+    )
+    log_msg(debug = paste0("Design matrix (first 10 rows):\n", design_preview))
     fit <- limma::lmFit(expr_mat, design_matrix)
     if (apply_contrasts) {
       fit <- limma::contrasts.fit(fit, contrast_matrix)

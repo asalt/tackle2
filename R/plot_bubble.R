@@ -386,19 +386,8 @@ all_bubble_plots <- function(
               ))
             }
 
-            rank_label <- sel$rankname %>% na.omit() %>% unique()
-            rank_label <- if (length(rank_label) == 0) {
-              NULL
-            } else {
-              rank_label %>%
-                str_replace_all("_", " ") %>%
-                paste(collapse = ", ")
-            }
-            base_subtitle <- if (!is.null(rank_label)) {
-              paste0("rank: ", rank_label, " • top ", effective_limit)
-            } else {
-              paste0("top ", effective_limit, " pathways")
-            }
+            rank_label <- comparison_label %||% comparison_name
+            base_subtitle <- paste0("rank: ", rank_label, " • top ", effective_limit)
             subtitle_text <- paste0(base_subtitle, " • source: ", collection_label)
 
             bubble_plot(
