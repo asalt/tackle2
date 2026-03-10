@@ -407,10 +407,14 @@ def test_report_consumes_stored_summary_json(tmp_path):
     assert "Precomputed run summary." in html
     assert "Stored summary bullet." in html
     assert 'href="ai.html"' in html
+    assert str(savedir) not in html
     ai_html = (output_dir / "ai.html").read_text(encoding="utf-8")
     assert "AI Summaries" in ai_html
+    assert "can make mistakes" in ai_html
+    assert "llama3.1 tulu" in ai_html
     assert "Precomputed run summary." in ai_html
     assert "Leading-edge genes point to an apoptosis-focused signal driven by TP53 and BAX." in ai_html
+    assert str(savedir) not in ai_html
     comparison_html = (output_dir / "collections" / "h" / "group-a.html").read_text(encoding="utf-8")
     assert "Leading-edge genes point to an apoptosis-focused signal driven by TP53 and BAX." in comparison_html
     assert "TP53, BAX, and CASP3 anchor the leading-edge set." in comparison_html

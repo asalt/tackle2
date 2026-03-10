@@ -232,6 +232,30 @@ def _format_display(token: str) -> str:
     return token.replace("_", " ").strip() or token
 
 
+def _display_path(path: Path) -> str:
+    resolved = Path(path).expanduser().resolve()
+    parts = resolved.parts
+    lowered = [part.lower() for part in parts]
+
+    for anchor in ("results", "gsea", "report"):
+        if anchor in lowered:
+            index = lowered.index(anchor)
+            return "/".join(parts[index:])
+
+    cwd = Path.cwd().resolve()
+    try:
+        relative = resolved.relative_to(cwd)
+    except ValueError:
+        relative = None
+    if relative is not None:
+        relative_text = relative.as_posix()
+        if relative_text and relative_text != ".":
+            return relative_text
+
+    tail = [part for part in parts[-4:] if part not in (resolved.anchor, "/", "")]
+    return "/".join(tail) or resolved.name
+
+
 def _parse_leading_genes(value: object) -> Tuple[str, ...]:
     if not isinstance(value, str):
         return ()
@@ -372,7 +396,7 @@ def build_context(
     context = {
         "generated_at": now_utc.strftime("%Y-%m-%d %H:%M UTC"),
         "savedir_name": savedir.name,
-        "savedir_path": str(savedir),
+        "savedir_path": _display_path(savedir),
         "stats": {
             "collections": len(collections),
             "comparisons": total_comparisons,
@@ -384,7 +408,7 @@ def build_context(
         "plots": plots,
         "logs": logs,
         "has_tables": len(table_entries) > 0,
-        "config_path": str(config_path) if config_path else None,
+        "config_path": _display_path(Path(config_path)) if config_path else None,
         "llm_summary": None,
     }
 

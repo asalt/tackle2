@@ -31,6 +31,12 @@
     <p class="meta">Generated {{ generated_at }} from <code>{{ savedir_path }}</code></p>
   </header>
 
+  <section class="llm-summary">
+    <h2>Use With Care</h2>
+    <p>These AI-generated notes can make mistakes. Check important findings against the source tables, plots, and pathway results before relying on them.</p>
+    <p class="meta">This summary flow is built with llama3.1 tulu via the shared agent API.</p>
+  </section>
+
   {% if run_summary %}
   <section class="llm-summary">
     <h2>Run Overview</h2>
