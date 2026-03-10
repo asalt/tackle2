@@ -89,25 +89,28 @@ test_that("create_rnkfiles_from_volcano processes files rename", {
 
 
 test_that("write_rnkfiles writes files correctly", {
-  withr::with_tempdir("rnk_test", {
+  withr::with_tempdir({
     lst <- list(
       test1 = tibble(GeneID = c("Gene1", "Gene2"), value = c(0.5, -1.2)),
       test2 = tibble(GeneID = c("Gene3", "Gene4"), value = c(1.5, -0.3))
     )
-    io_tools$write_rnkfiles(lst, "rnk_test")
-    expect_true(fs::file_exists("rnk_test/test1.rnk"))
-    expect_true(fs::file_exists("rnk_test/test2.rnk"))
+    out_dir <- file.path(getwd(), "rnk_test")
+    io_tools$write_rnkfiles(lst, out_dir)
+    expect_true(fs::file_exists(file.path(out_dir, "test1.rnk")))
+    expect_true(fs::file_exists(file.path(out_dir, "test2.rnk")))
   })
 })
 
 
 
 test_that("load_rnkfiles loads and processes files correctly", {
-  withr::with_tempdir("rnk_test", {
-    write_lines("Gene1\t0.5\nGene2\t-1.2", "file1.rnk")
-    write_lines("Gene3\t1.5\nGene4\t-0.3", "file2.rnk")
+  withr::with_tempdir({
+    f1 <- file.path(getwd(), "file1.rnk")
+    f2 <- file.path(getwd(), "file2.rnk")
+    write_lines("Gene1\t0.5\nGene2\t-1.2", f1)
+    write_lines("Gene3\t1.5\nGene4\t-0.3", f2)
 
-    result <- io_tools$load_rnkfiles(c("file1.rnk", "file2.rnk")) # returns a dataframe with columns: id, value
+    result <- io_tools$load_rnkfiles(c(f1, f2)) # returns a dataframe with columns: id, value
     expect_equal(length(result), 2)
     expect_equal(nrow(result[[1]]), 2)
     expect_equal(nrow(result[[2]]), 2)
@@ -117,7 +120,7 @@ test_that("load_rnkfiles loads and processes files correctly", {
 })
 
 test_that("create_rnkfiles_from_volcano handles missing directory correctly", {
-  expect_error(create_rnkfiles("non_existent_directory"))
+  expect_error(io_tools$create_rnkfiles_from_volcano("non_existent_directory"))
 })
 
 
@@ -288,6 +291,53 @@ test_that("create_rnkfiles_from_model fits limma contrasts", {
     expect_true(length(tables_attr) >= 1)
     first_table <- tables_attr[[1]]
     expect_true("GeneSymbol" %in% colnames(first_table))
+  })
+})
+
+test_that("save_individual_gsea_results exports leadingEdge list column", {
+  withr::with_tempdir({
+    out_dir <- file.path(getwd(), "gsea_tables")
+    res <- readRDS(file.path(here("R/tests/unit_tests/fixtures/fgsea_basic_results.rds")))
+    results_list <- list(
+      TestCollection = list(
+        sample_A = dplyr::filter(res, rankname == "sample_A")
+      )
+    )
+
+    io_tools$save_individual_gsea_results(
+      results_list = results_list,
+      savedir = out_dir,
+      replace = TRUE
+    )
+
+    files <- fs::dir_ls(out_dir, glob = "*.tsv")
+    expect_equal(length(files), 1)
+    exported <- readr::read_tsv(files[[1]], show_col_types = FALSE)
+    expect_true("leadingEdge" %in% colnames(exported))
+    expect_true(all(nzchar(exported$leadingEdge)))
+    expect_true(any(stringr::str_detect(exported$leadingEdge, "gene1")))
+  })
+})
+
+test_that("save_pivoted_gsea_results exports leadingEdge as text", {
+  withr::with_tempdir({
+    out_dir <- file.path(getwd(), "gsea_tables")
+    res <- readRDS(file.path(here("R/tests/unit_tests/fixtures/fgsea_basic_results.rds")))
+    results_list <- list(TestCollection = res)
+
+    io_tools$save_pivoted_gsea_results(
+      results_list = results_list,
+      savedir = out_dir,
+      replace = TRUE,
+      species = "Homo sapiens"
+    )
+
+    files <- fs::dir_ls(out_dir, glob = "*.tsv")
+    expect_equal(length(files), 1)
+    exported <- readr::read_tsv(files[[1]], show_col_types = FALSE)
+    le_cols <- grep("^leadingEdge", colnames(exported), value = TRUE)
+    expect_true(length(le_cols) > 0)
+    expect_true(all(nzchar(exported[[le_cols[[1]]]])))
   })
 })
 

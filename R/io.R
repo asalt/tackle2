@@ -140,14 +140,16 @@ create_rnkfiles_from_volcano <- function(
     purrr::map(~ {
       .table <- read_tsv(.x, show_col_types = F)
       if (value_col %in% colnames(.table)) {
-        .table <- .table %>% rename(value = !!value_col)
+        .table <- dplyr::rename(.table, value = !!rlang::sym(value_col))
       }
       if (tolower(value_col) %in% tolower(colnames(.table))) {
         .match <- colnames(.table)[ stringr::str_detect(tolower(colnames(.table)), tolower(value_col)) ]
-        .table <- dplyr::rename(.table, value = !!rlang::sym(.match))
+        if (length(.match) >= 1) {
+          .table <- dplyr::rename(.table, value = !!rlang::sym(.match[[1]]))
+        }
       }
       if (id_col %in% colnames(.table)) {
-        .table <- .table %>% rename(id = !!id_col)
+        .table <- dplyr::rename(.table, id = !!rlang::sym(id_col))
       }
       return(.table)
     })
@@ -175,7 +177,7 @@ write_rnkfiles <- function(
   }
   if (!fs::dir_exists(dir)) {
     log_msg(msg = paste0("creating ", dir))
-    fs::dir_create(dir)
+    fs::dir_create(dir, recurse = TRUE)
   }
   lst %>% purrr::iwalk( # .x is the value, .y is the name
     ~ {
@@ -187,7 +189,6 @@ write_rnkfiles <- function(
         .x %>%
           dplyr::select(id, value) %>%
           write_tsv(.outname, col_names = FALSE)
-        print(paste0("Wrote ", .outname))
         log_msg(msg = paste0("Wrote ", .outname))
       }
     }
@@ -269,29 +270,49 @@ load_genesets_from_json <- function(json_str) {
 # }
 
 
-write_results <- function(result, outf, replace = FALSE) {
+collapse_list_col_chr <- function(x, collapse = "/") {
+  if (!is.list(x)) return(x)
+  purrr::map_chr(x, function(el) {
+    if (is.null(el) || length(el) == 0) return(NA_character_)
+    flat <- unlist(el, use.names = FALSE)
+    flat <- as.character(flat)
+    flat <- flat[!is.na(flat)]
+    if (length(flat) == 0) return(NA_character_)
+    paste(flat, collapse = collapse)
+  })
+}
 
-  if (is.null(replace)) replace <- FALSE
+prepare_results_for_export <- function(result, collapse = "/") {
   if (!is.data.frame(result)) {
     log_msg(msg = "Invalid result, cannot write to file.")
     log_msg(msg = as.character(result))
     stop("Invalid result, cannot write to file.")
   }
 
-  if (!"leadingEdge" %in% colnames(result)) {
-    log_msg(msg = "leadingEdge column not found in the input data")
-    stop("leadingEdge column not found in the input data")
+  list_cols <- vapply(result, is.list, logical(1))
+  if (!any(list_cols)) {
+    return(result)
   }
+
+  out <- result
+  for (col in names(out)[list_cols]) {
+    out[[col]] <- collapse_list_col_chr(out[[col]], collapse = collapse)
+  }
+  out
+}
+
+write_results <- function(result, outf, replace = FALSE) {
+  if (is.null(replace)) replace <- FALSE
 
   if (fs::file_exists(outf) && !replace) {
     log_msg(msg = paste0("File ", outf, " already exists, skipping"))
-    return()
+    return(invisible(NULL))
   }
 
-  result %>%
-    mutate(leadingEdge = purrr::map_chr(leadingEdge, paste, collapse = "/")) %>%
-    write_tsv(outf)
+  result_export <- prepare_results_for_export(result)
+  result_export %>% write_tsv(outf)
   log_msg(msg = paste0("Successfully written to ", outf))
+  return(invisible(outf))
 }
 
 # Main function to save GSEA results
@@ -331,7 +352,7 @@ log_msg(msg = paste0("length results list :", length(results_list)))
         log_msg(msg = paste0("File ", outf, " already exists, skipping"))
         # return(result)
       } else {
-        result %>% write_tsv(outf)
+        write_results(result, outf, replace = replace)
       }
     })
   })
@@ -350,9 +371,10 @@ log_msg(msg = paste0("length results list :", length(results_list)))
 
 }
 
-save_pivoted_gsea_results <- function(results_list, savedir = "gsea_tables", replace = FALSE, species = species) {
+save_pivoted_gsea_results <- function(results_list, savedir = "gsea_tables", replace = FALSE, species = "Homo sapiens") {
 
   if (is.null(replace)) replace <- FALSE
+  fs::dir_create(savedir)
   # here results list is concatenated list. one level per collection
   # names are the collection names
   # values are the fgsea concatenated tables/comparisons for given collection
@@ -364,11 +386,24 @@ save_pivoted_gsea_results <- function(results_list, savedir = "gsea_tables", rep
       result_collection  <- .x
       collection_name <- .y
 
-      res_pivoted <- result_collection %>%
+      wanted <- c(
+      "pval", "padj", "log2err", "ES", "NES",
+      "n_main", "size",
+      "leadingEdge",
+      "leadingEdge_genesymbol",
+      "leadingEdge_entrezid",
+      "mainpathway"
+    )
+      present <- intersect(colnames(result_collection), wanted)
+
+      result_collection_export <- prepare_results_for_export(result_collection)
+
+      res_pivoted <- result_collection_export %>%
         pivot_wider(
           id_cols = c("pathway"),
           names_from = rankname,
-          values_from = c(pval, padj, log2err, ES, NES, n_main, size, leadingEdge_genesymbol, leadingEdge_entrezid, mainpathway),
+          # values_from = c(pval, padj, log2err, ES, NES, n_main, size, leadingEdge_genesymbol, leadingEdge_entrezid, mainpathway),
+          values_from = all_of(present),
           names_sep = "_"
           # Alternatively, use names_glue for more complex naming
           # names_glue = "{rankname}_{.value}"
@@ -383,7 +418,9 @@ save_pivoted_gsea_results <- function(results_list, savedir = "gsea_tables", rep
         return(res_pivoted)
       }
       log_msg(msg=paste0("Writing: ", outf, "..."))
-      res_pivoted %>% write_tsv(outf)
+      res_pivoted %>%
+        prepare_results_for_export() %>%
+        write_tsv(outf)
       return(res_pivoted)
     }
   )
