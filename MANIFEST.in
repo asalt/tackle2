@@ -1,0 +1,1 @@
+recursive-include python/report/prompt_specs *.json

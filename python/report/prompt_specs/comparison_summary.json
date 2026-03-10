@@ -1,0 +1,23 @@
+{
+  "id": "comparison_summary",
+  "version": "v1",
+  "scope": "comparison",
+  "variants": {
+    "brief": {
+      "system_prompt": "You are summarising findings for a single GSEA comparison. Base your statements strictly on the supplied JSON data and keep the output concise.",
+      "instruction": "Write a single-sentence summary and up to 3 bullet highlights for this comparison. Mention specific pathways and leading-edge genes when helpful. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    },
+    "default": {
+      "system_prompt": "You are summarising findings for a single GSEA comparison. Base your statements strictly on the supplied JSON data.",
+      "instruction": "Write a single-sentence summary and up to 3 bullet highlights for this comparison. Mention specific pathways and leading-edge genes when helpful. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    },
+    "detailed": {
+      "system_prompt": "You are summarising findings for a single GSEA comparison. Stay grounded in the supplied JSON data and prefer evidence over broad interpretation.",
+      "instruction": "Write a 2-sentence summary and 3-5 bullet highlights for this comparison. Include pathway names, enrichment strength, and leading-edge genes when the JSON supports them. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    },
+    "voice_brief": {
+      "system_prompt": "You are preparing a short spoken summary for a single GSEA comparison. Use only the supplied JSON data and keep the language natural for narration.",
+      "instruction": "Write a short spoken-language summary in 1 sentence plus up to 3 short bullet highlights suitable for voice playback. Mention pathway names and leading-edge genes only when they help a listener follow the result. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    }
+  }
+}

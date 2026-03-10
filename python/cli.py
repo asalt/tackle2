@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 import re
 import glob
 import shutil
@@ -22,7 +23,9 @@ from . import export_packager
 from . import config_schema
 from . import config_doctor
 from .report.generator import ReportGenerationError, generate_report, serve_directory
-from .report.llm import OllamaConfig, OllamaSummarizer
+from .report.llm import AgentApiConfig, AgentApiSummarizer, SummarisationError
+from .report.prompts import list_prompt_specs
+from .report.summary_store import generate_and_store_summaries
 
 # from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -70,6 +73,31 @@ def _copy_example(source: pathlib.Path, destination: pathlib.Path) -> bool:
     shutil.copy(source, destination)
     click.echo(f"Writing {destination}")
     return True
+
+
+def _load_prompt_notes(prompt_note, prompt_note_file):
+    notes = [str(note).strip() for note in prompt_note if str(note).strip()]
+    for note_file in prompt_note_file:
+        text = Path(note_file).read_text(encoding="utf-8").strip()
+        if text:
+            notes.append(text)
+    return notes
+
+
+def _print_prompt_preview(summary_dir: Path) -> None:
+    for path in sorted(summary_dir.rglob("*.json")):
+        if path.name == "manifest.json" or ".cache" in path.parts:
+            continue
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        prompt = payload.get("prompt") or {}
+        header = payload.get("title") or payload.get("key") or path.name
+        click.echo("")
+        click.echo(f"=== {header} ===")
+        click.echo(
+            f"scope={payload.get('scope')} prompt_id={prompt.get('id')} "
+            f"version={prompt.get('version')} variant={prompt.get('variant')}"
+        )
+        click.echo(str(prompt.get("prompt_text") or "").strip())
 
 
 @main.command()
@@ -366,6 +394,12 @@ def package(
     type=click.Path(file_okay=False, dir_okay=True),
     help="Directory where the report should be written (defaults to <savedir>/report)",
 )
+@click.option(
+    "--summary-dir",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True),
+    help="Optional directory containing precomputed report summary JSON files.",
+)
+@click.option("--force", is_flag=True, help="Refresh bundled report assets when rebuilding an existing report directory.")
 @click.option("--serve/--no-serve", default=False, show_default=True, help="Launch a static web server after generation")
 @click.option("--port", default=8000, show_default=True, help="Port for --serve")
 @click.option("--no-browser", is_flag=True, help="Do not auto-open the browser when serving")
@@ -376,36 +410,16 @@ def package(
     show_default=True,
     help="Logging verbosity for report generation.",
 )
-@click.option("--llm-model", default=None, help="Ollama model for AI-generated summaries (e.g., 'llama3.2:3b').")
-@click.option("--llm-host", default=None, help="Override Ollama host URL (default uses OLLAMA_HOST or localhost).")
-@click.option("--llm-temperature", default=0.2, type=float, show_default=True, help="Sampling temperature for the LLM.")
-@click.option("--llm-max-tokens", default=512, type=int, show_default=True, help="Maximum tokens requested per summary.")
-@click.option("--llm-run-limit", default=6, type=int, show_default=True, help="Collections considered for the overall summary (0 = all).")
-@click.option("--llm-collections/--no-llm-collections", default=True, show_default=True, help="Generate per-collection summaries.")
-@click.option("--llm-collection-limit", default=3, type=int, show_default=True, help="Maximum collections with individual summaries (0 = all).")
-@click.option("--llm-comparisons/--no-llm-comparisons", default=False, show_default=True, help="Generate per-comparison summaries (experimental).")
-@click.option("--llm-comparison-limit", default=0, type=int, show_default=True, help="Limit per-collection comparison summaries when enabled (0 = all).")
-@click.option("--llm-comparisons-per-collection", default=3, type=int, show_default=True, help="Comparisons per collection included in prompts (0 = all).")
-@click.option("--llm-pathway-limit", default=3, type=int, show_default=True, help="Top pathways per comparison shared with the LLM (0 = all).")
 def report(
     savedir,
     config,
     output,
+    summary_dir,
+    force,
     serve,
     port,
     no_browser,
     log_level,
-    llm_model,
-    llm_host,
-    llm_temperature,
-    llm_max_tokens,
-    llm_run_limit,
-    llm_collections,
-    llm_collection_limit,
-    llm_comparisons,
-    llm_comparison_limit,
-    llm_comparisons_per_collection,
-    llm_pathway_limit,
 ):
     """Generate an HTML report summarising analysis outputs."""
 
@@ -415,32 +429,13 @@ def report(
         force=True,
     )
 
-    summarizer = None
-    if llm_model:
-        try:
-            summarizer_config = OllamaConfig(
-                model=llm_model,
-                host=llm_host,
-                temperature=llm_temperature,
-                max_tokens=max(0, llm_max_tokens),
-                run_collection_limit=max(0, llm_run_limit),
-                enable_collection_summaries=llm_collections,
-                collection_summary_limit=max(0, llm_collection_limit),
-                enable_comparison_summaries=llm_comparisons,
-                comparison_summary_limit=max(0, llm_comparison_limit),
-                comparisons_per_collection=max(0, llm_comparisons_per_collection),
-                pathways_per_comparison=max(0, llm_pathway_limit),
-            )
-            summarizer = OllamaSummarizer(summarizer_config)
-        except Exception as exc:  # pragma: no cover - defensive
-            raise click.ClickException(f"Failed to initialise LLM summariser: {exc}") from exc
-
     try:
         index_path = generate_report(
             savedir=Path(savedir) if savedir else None,
             config=Path(config) if config else None,
             output=Path(output) if output else None,
-            summarizer=summarizer,
+            summary_dir=Path(summary_dir) if summary_dir else None,
+            force=force,
         )
     except ReportGenerationError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -452,6 +447,145 @@ def report(
             serve_directory(index_path.parent, port=port, open_browser=not no_browser)
         except ReportGenerationError as exc:
             raise click.ClickException(str(exc)) from exc
+
+
+@main.command("report-summaries")
+@click.option(
+    "-s",
+    "--savedir",
+    type=click.Path(exists=True, file_okay=False),
+    help=f"Directory containing {APP_NAME} pipeline outputs",
+)
+@click.option(
+    "-c",
+    "--config",
+    type=click.Path(exists=True, dir_okay=False),
+    help="TOML configuration file used for the run",
+)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(file_okay=False, dir_okay=True),
+    help="Directory where summary JSON should be written (defaults to <savedir>/report/ai)",
+)
+@click.option("--include-run/--skip-run", default=True, show_default=True, help="Generate an overall run summary.")
+@click.option("--include-collections/--skip-collections", default=True, show_default=True, help="Generate per-collection summaries.")
+@click.option("--include-comparisons/--skip-comparisons", default=False, show_default=True, help="Generate per-comparison summaries.")
+@click.option("--include-leading-edge/--skip-leading-edge", default=False, show_default=True, help="Generate pathway-level leading-edge summaries.")
+@click.option("--collection-limit", default=3, type=int, show_default=True, help="Maximum collections with individual summaries (0 = all).")
+@click.option("--comparison-limit", default=0, type=int, show_default=True, help="Maximum comparison summaries per collection (0 = all).")
+@click.option("--comparisons-per-collection", default=3, type=int, show_default=True, help="Comparisons per collection included in collection-level prompt context (0 = all).")
+@click.option("--pathway-limit", default=8, type=int, show_default=True, help="Top pathways per comparison included in prompts (0 = all).")
+@click.option("--leading-edge-limit", default=3, type=int, show_default=True, help="Maximum leading-edge pathway summaries per comparison (0 = all available top pathways).")
+@click.option("--leading-edge-gene-limit", default=12, type=int, show_default=True, help="Leading-edge genes included in each pathway prompt (0 = all available).")
+@click.option("--model-label", default=None, help="Display label for generated summaries (defaults to TACKLE_AGENT_MODEL_LABEL).")
+@click.option("--prompt-variant", default="default", show_default=True, help="Prompt variant to use across scopes (for example: brief, default, detailed, voice_brief).")
+@click.option("--run-prompt-id", default="run_overview", show_default=True, help="Prompt id for overall run summaries.")
+@click.option("--collection-prompt-id", default="collection_summary", show_default=True, help="Prompt id for collection summaries.")
+@click.option("--comparison-prompt-id", default="comparison_summary", show_default=True, help="Prompt id for comparison summaries.")
+@click.option("--leading-edge-prompt-id", default="leading_edge_summary", show_default=True, help="Prompt id for pathway-level leading-edge summaries.")
+@click.option("--prompt-note", multiple=True, help="Additional note appended to every summary prompt.")
+@click.option(
+    "--prompt-note-file",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Text file whose contents are appended to every summary prompt.",
+)
+@click.option("--print-prompts", is_flag=True, help="Print fully rendered prompts after writing the JSON files.")
+@click.option("--preview-only", is_flag=True, help="Write prompt-rich JSON files without calling the agent API.")
+@click.option("--force", is_flag=True, help="Regenerate summary JSON even if the stored prompt hash matches.")
+def report_summaries(
+    savedir,
+    config,
+    output,
+    include_run,
+    include_collections,
+    include_comparisons,
+    include_leading_edge,
+    collection_limit,
+    comparison_limit,
+    comparisons_per_collection,
+    pathway_limit,
+    leading_edge_limit,
+    leading_edge_gene_limit,
+    model_label,
+    prompt_variant,
+    run_prompt_id,
+    collection_prompt_id,
+    comparison_prompt_id,
+    leading_edge_prompt_id,
+    prompt_note,
+    prompt_note_file,
+    print_prompts,
+    preview_only,
+    force,
+):
+    """Generate and store report summary JSON via the shared external agent API."""
+
+    notes = _load_prompt_notes(prompt_note, prompt_note_file)
+    include_comparisons = include_comparisons or include_leading_edge
+
+    try:
+        summarizer_config = AgentApiConfig.from_env(
+            agent_api="http://preview-only.invalid" if preview_only else None,
+            model=model_label,
+            collection_summary_limit=max(0, collection_limit),
+            enable_collection_summaries=include_collections,
+            enable_comparison_summaries=include_comparisons,
+            comparison_summary_limit=max(0, comparison_limit),
+            comparisons_per_collection=max(0, comparisons_per_collection),
+            pathways_per_comparison=max(0, pathway_limit),
+            enable_leading_edge_summaries=include_leading_edge,
+            leading_edge_summary_limit=max(0, leading_edge_limit),
+            leading_edge_gene_limit=max(0, leading_edge_gene_limit),
+            force_refresh=force,
+            prompt_variant=prompt_variant,
+            run_prompt_id=run_prompt_id,
+            collection_prompt_id=collection_prompt_id,
+            comparison_prompt_id=comparison_prompt_id,
+            leading_edge_prompt_id=leading_edge_prompt_id,
+        )
+        summarizer = AgentApiSummarizer(summarizer_config)
+    except SummarisationError as exc:
+        raise click.ClickException(str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - defensive
+        raise click.ClickException(f"Failed to initialise agent summariser: {exc}") from exc
+
+    try:
+        result = generate_and_store_summaries(
+            savedir=Path(savedir) if savedir else None,
+            config=Path(config) if config else None,
+            output=Path(output) if output else None,
+            summarizer=summarizer,
+            include_run=include_run,
+            include_collections=include_collections,
+            include_comparisons=include_comparisons,
+            include_leading_edges=include_leading_edge,
+            prompt_notes=notes,
+            preview_only=preview_only,
+            force=force,
+        )
+    except KeyError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"Summary JSON written to {result.output_dir}")
+    click.echo(f"Manifest: {result.manifest_path}")
+    click.echo(f"Generated: {result.generated}")
+    click.echo(f"Reused: {result.reused}")
+    if result.preview_only:
+        click.echo("Mode: preview-only")
+    if print_prompts:
+        _print_prompt_preview(result.output_dir)
+
+
+@main.command("list-summary-prompts")
+def list_summary_prompts():
+    """List available prompt ids, scopes, versions, and variants."""
+
+    for spec in list_prompt_specs():
+        variants = ", ".join(sorted(spec.variants))
+        click.echo(
+            f"{spec.prompt_id}\tscope={spec.scope}\tversion={spec.version}\tvariants={variants}"
+        )
 
 def _serialize_default(value):
     if isinstance(value, (dict, list)):

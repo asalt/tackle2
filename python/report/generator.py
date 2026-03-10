@@ -17,6 +17,7 @@ import click
 
 from .. import export_packager
 from . import assets, catalog, summary, templating
+from .summary_store import apply_stored_summaries, default_summary_dir
 
 if TYPE_CHECKING:
     from .llm import ReportSummarizer
@@ -190,11 +191,72 @@ def _filter_entries_by_tokens(
     return results
 
 
+def _build_ai_page_context(
+    context: Dict[str, Any],
+    collections: List[Any],
+    collection_detail_map: Dict[str, str],
+    comparison_detail_maps: Dict[str, Dict[str, str]],
+) -> Optional[Dict[str, Any]]:
+    collection_sections: List[Dict[str, Any]] = []
+    for collection in collections:
+        comparison_sections: List[Dict[str, Any]] = []
+        comparison_links = comparison_detail_maps.get(collection.identifier, {})
+        for comparison in collection.comparisons:
+            leading_edges = [
+                {
+                    "name": pathway.pathway,
+                    "nes": pathway.nes,
+                    "padj": pathway.padj,
+                    "summary": pathway.llm_summary,
+                }
+                for pathway in comparison.top_pathways
+                if pathway.llm_summary is not None
+            ]
+            if comparison.llm_summary is None and not leading_edges:
+                continue
+            comparison_sections.append(
+                {
+                    "name": comparison.display_name,
+                    "href": comparison_links.get(comparison.identifier),
+                    "summary": comparison.llm_summary,
+                    "leading_edges": leading_edges,
+                }
+            )
+
+        if collection.llm_summary is None and not comparison_sections:
+            continue
+
+        collection_sections.append(
+            {
+                "name": collection.display_name,
+                "href": collection_detail_map.get(collection.identifier),
+                "summary": collection.llm_summary,
+                "comparisons": comparison_sections,
+            }
+        )
+
+    run_summary = context.get("llm_summary")
+    if run_summary is None and not collection_sections:
+        return None
+
+    return {
+        "run_summary": run_summary,
+        "collection_sections": collection_sections,
+        "savedir_name": context["savedir_name"],
+        "savedir_path": context["savedir_path"],
+        "generated_at": context["generated_at"],
+        "static_href": "static/report.css",
+        "back_href": "index.html",
+    }
+
+
 def generate_report(
     savedir: Optional[Path] = None,
     config: Optional[Path] = None,
     output: Optional[Path] = None,
+    summary_dir: Optional[Path] = None,
     summarizer: Optional["ReportSummarizer"] = None,
+    force: bool = False,
 ) -> Path:
     """Create the static HTML report and return the generated index path."""
 
@@ -204,8 +266,19 @@ def generate_report(
     context = summary.build_context(paths.savedir, artefacts, config_path=paths.config_path)
 
     collections = context.get("collections", [])
+    resolved_summary_dir = Path(summary_dir).expanduser().resolve() if summary_dir else default_summary_dir(paths.savedir)
+    apply_stored_summaries(
+        context=context,
+        collections=collections,
+        summary_dir=resolved_summary_dir,
+    )
 
     if summarizer and collections:
+        try:
+            summarizer.set_cache_dir(paths.output_dir / ".ai-cache")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Unable to configure summary cache directory: %s", exc)
+
         try:
             llm_summary = summarizer.summarise_run(collections)
         except Exception as exc:  # pragma: no cover - defensive
@@ -238,7 +311,7 @@ def generate_report(
                 if summary_obj:
                     comparison.llm_summary = summary_obj
 
-    templating.install_static_assets(paths.output_dir)
+    templating.install_static_assets(paths.output_dir, force=force)
 
     previews = assets.prepare_plot_previews(artefacts.plot_files, paths.savedir, paths.output_dir, limit=120)
     if previews:
@@ -251,6 +324,8 @@ def generate_report(
     log_entries = _collect_log_entries(artefacts.log_files, paths.savedir)
 
     collection_pages: List[Dict[str, Any]] = []
+    collection_detail_map: Dict[str, str] = {}
+    comparison_detail_maps: Dict[str, Dict[str, str]] = {}
     collections_dir = paths.output_dir / "collections"
 
     for collection in context.get("collections", []):
@@ -325,6 +400,8 @@ def generate_report(
             )
             comparison_detail_map[comparison.identifier] = comparison_href
 
+        comparison_detail_maps[collection.identifier] = comparison_detail_map
+
         detail_context = {
             "collection": collection,
             "plot_groups": collection_plot_groups,
@@ -356,10 +433,27 @@ def generate_report(
                 "href": collection_filename.as_posix(),
             }
         )
+        collection_detail_map[collection.identifier] = collection_filename.as_posix()
 
     context["collection_pages"] = collection_pages
     context["savedir_relprefix"] = "."
     context["preview_relprefix"] = ""
+    ai_context = _build_ai_page_context(
+        context,
+        context.get("collections", []),
+        collection_detail_map,
+        comparison_detail_maps,
+    )
+    if ai_context is not None:
+        ai_destination = paths.output_dir / "ai.html"
+        ai_html = templating.render_ai_summary(ai_context)
+        ai_destination.write_text(ai_html, encoding="utf-8")
+        context["ai_page"] = {
+            "name": "AI Summaries",
+            "href": ai_destination.name,
+        }
+    else:
+        context["ai_page"] = None
 
     index_html = templating.render_report(context)
     output_path = paths.output_dir / "index.html"

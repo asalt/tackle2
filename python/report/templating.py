@@ -13,6 +13,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 INDEX_TEMPLATE_NAME = "index.html.j2"
 COLLECTION_TEMPLATE_NAME = "collection.html.j2"
 COMPARISON_TEMPLATE_NAME = "comparison.html.j2"
+AI_TEMPLATE_NAME = "ai_summary.html.j2"
 TEMPLATE_PACKAGE = __package__
 
 
@@ -45,7 +46,13 @@ def render_comparison(context: dict) -> str:
     return template.render(**context)
 
 
-def install_static_assets(destination: Path) -> None:
+def render_ai_summary(context: dict) -> str:
+    env = _environment()
+    template = env.get_template(AI_TEMPLATE_NAME)
+    return template.render(**context)
+
+
+def install_static_assets(destination: Path, *, force: bool = False) -> None:
     base = resources.files(TEMPLATE_PACKAGE)
     static_dir = base / "static"
     target = Path(destination) / "static"
@@ -55,11 +62,14 @@ def install_static_assets(destination: Path) -> None:
         dest = target / entry.name
         if entry.is_dir():
             if dest.exists():
-                shutil.rmtree(dest)
-            shutil.copytree(entry, dest)
+                if force:
+                    shutil.rmtree(dest)
+                    shutil.copytree(entry, dest)
+            else:
+                shutil.copytree(entry, dest)
         else:
-            if not dest.exists():
+            if force or not dest.exists():
                 shutil.copyfile(entry, dest)
 
 
-__all__ = ["render_report", "render_collection", "render_comparison", "install_static_assets"]
+__all__ = ["render_report", "render_collection", "render_comparison", "render_ai_summary", "install_static_assets"]

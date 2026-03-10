@@ -1,0 +1,23 @@
+{
+  "id": "run_overview",
+  "version": "v1",
+  "scope": "run",
+  "variants": {
+    "brief": {
+      "system_prompt": "You are assisting with summarising gene set enrichment analysis results. Use only the provided JSON data and keep the response short, factual, and clear.",
+      "instruction": "Create a 1-2 sentence overview and 2-3 bullet highlights describing the overall GSEA findings. Prefer concrete counts, groups, pathways, and leading-edge genes when present. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    },
+    "default": {
+      "system_prompt": "You are assisting with summarising gene set enrichment analysis results. Use only the provided JSON data to produce concise, factual summaries. Highlight comparisons with the most significant pathways (padj < 0.05).",
+      "instruction": "Create a 2-3 sentence overview and 3-5 bullet highlights describing the overall GSEA findings. Use concrete counts, groups, pathways, and leading-edge genes when present. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    },
+    "detailed": {
+      "system_prompt": "You are assisting with summarising gene set enrichment analysis results. Use only the provided JSON data and stay factual, specific, and restrained.",
+      "instruction": "Create a 3-4 sentence overview and 5-7 bullet highlights describing the overall GSEA findings. Mention notable collections, comparisons, significant pathways, and leading-edge genes when the JSON supports them. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    },
+    "voice_brief": {
+      "system_prompt": "You are preparing a short spoken summary of gene set enrichment analysis results. Use only the provided JSON data. Keep the language natural for text-to-speech and avoid sounding like file metadata.",
+      "instruction": "Write a short spoken-language overview in 1-2 sentences plus 2-3 short bullet highlights suitable for narration. Favor simple wording, but keep concrete pathway names and leading-edge genes when important. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    }
+  }
+}

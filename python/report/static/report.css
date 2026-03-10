@@ -7,9 +7,32 @@
 }
 
 body {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 2rem 1.2rem 4rem;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0;
+  padding: 0;
+}
+
+.main-container {
+  max-width: 100% !important;
+  margin: auto;
+}
+
+main.main-container {
+  width: 100%;
+  padding: 1.6rem 1rem 3rem 1rem;
+  box-sizing: border-box;
+}
+
+header,
+section,
+footer,
+.collection,
+.comparison,
+.llm-summary,
+.collection-nav {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 a {
@@ -176,7 +199,7 @@ tbody tr:nth-child(every 2) {
 }
 
 .file-list .preview {
-  max-width: 320px;
+  max-width: 100%;
 }
 
 .file-list .preview img {

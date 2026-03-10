@@ -1,0 +1,23 @@
+{
+  "id": "collection_summary",
+  "version": "v1",
+  "scope": "collection",
+  "variants": {
+    "brief": {
+      "system_prompt": "You are writing short summaries for a single GSEA collection. Stay grounded in the provided JSON data and keep the output compact.",
+      "instruction": "Summarise this collection in 1-2 short sentences and provide up to 3 bullet highlights. Emphasise top pathways, comparisons, and leading-edge genes when the JSON supports them. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    },
+    "default": {
+      "system_prompt": "You are writing short summaries for a single GSEA collection. Summaries must stay grounded in the provided JSON data and emphasise key pathways.",
+      "instruction": "Summarise this collection in 2 short sentences and provide up to 3 bullet highlights. Emphasise top pathways, comparisons, and leading-edge genes when the JSON supports them. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    },
+    "detailed": {
+      "system_prompt": "You are writing detailed summaries for a single GSEA collection. Stay grounded in the provided JSON data and prefer specific evidence over general language.",
+      "instruction": "Summarise this collection in 2-3 sentences and provide 4-6 bullet highlights. Include comparison-level contrasts, pathway names, and leading-edge genes when useful. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    },
+    "voice_brief": {
+      "system_prompt": "You are preparing a short spoken summary for one GSEA collection. Use only the provided JSON data and keep the wording natural for voice playback.",
+      "instruction": "Write a short spoken-language summary in 1-2 sentences and up to 3 short bullet highlights suitable for narration. Mention pathway names and leading-edge genes only when they improve clarity. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    }
+  }
+}

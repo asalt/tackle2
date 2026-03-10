@@ -1,0 +1,23 @@
+{
+  "id": "leading_edge_summary",
+  "version": "v1",
+  "scope": "leading_edge",
+  "variants": {
+    "brief": {
+      "system_prompt": "You are summarising the leading-edge genes for a single enriched GSEA pathway. Use only the provided JSON data and keep the output concise and evidence-based.",
+      "instruction": "Write a 1-sentence summary and up to 3 short bullet highlights for this leading-edge result. Mention the geneset, enrichment strength, and the most notable leading-edge genes. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    },
+    "default": {
+      "system_prompt": "You are summarising the leading-edge genes for a single enriched GSEA pathway. Stay grounded in the provided JSON data and avoid unsupported biological claims.",
+      "instruction": "Write a 1-2 sentence summary and 3-4 bullet highlights for this leading-edge result. Mention the geneset, enrichment strength, and the most notable leading-edge genes. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    },
+    "detailed": {
+      "system_prompt": "You are summarising the leading-edge genes for a single enriched GSEA pathway. Stay factual, specific, and conservative, using only the supplied JSON data.",
+      "instruction": "Write a 2-sentence summary and 4-6 bullet highlights for this leading-edge result. Mention the geneset, enrichment strength, how many leading-edge genes are shown, and the most relevant genes from the list. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    },
+    "voice_brief": {
+      "system_prompt": "You are preparing a short spoken summary for the leading-edge genes of a single enriched GSEA pathway. Use only the supplied JSON data and keep the wording natural for narration.",
+      "instruction": "Write a short spoken-language summary in 1 sentence plus up to 3 short bullet highlights suitable for voice playback. Mention the geneset and a few leading-edge genes only when they help a listener follow the result. Return ONLY a JSON object with keys 'summary' and 'bullets'."
+    }
+  }
+}
