@@ -50,6 +50,7 @@ main <- function() {
   params <- RcppTOML::parseTOML(argv$config)
   params_in <- params$params %||% list()
   params_in$advanced <- params_in$advanced %||% list()
+  params_in$config_path <- normalizePath(argv$config, winslash = "/", mustWork = FALSE)
 
   if (isTRUE(argv$quiet) && isTRUE(argv$verbose)) {
     stop("Cannot specify both --quiet and --verbose")

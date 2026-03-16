@@ -132,6 +132,28 @@ run <- function(params) {
     )
   }
 
+  if (db_enabled) {
+    con <- NULL
+    tryCatch(
+      {
+        con <- db_tools$get_con(db_cfg$path)
+        db_tools$upsert_run_metadata(
+          con = con,
+          savedir_path = params$savedir,
+          config_path = params$config_path %||% NULL,
+          species = species,
+          ranks_from = params$ranks_from %||% NULL
+        )
+      },
+      error = function(e) {
+        log_msg(warning = paste0("db run metadata write failed: ", conditionMessage(e)))
+      },
+      finally = {
+        if (!is.null(con)) db_tools$close_con(con)
+      }
+    )
+  }
+
   if (db_enabled && isTRUE(db_cfg$write_ranks)) {
     con <- NULL
     tryCatch(

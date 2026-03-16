@@ -22,6 +22,13 @@ import pandas as pd
 from . import export_packager
 from . import config_schema
 from . import config_doctor
+from .sqlite_schema import (
+    committed_paths as committed_schema_paths,
+    iter_migrations,
+    render_migration_sql,
+    render_sqlite_snapshot,
+    write_schema_artifacts,
+)
 from .report.generator import ReportGenerationError, generate_report, serve_directory
 from .report.llm import AgentApiConfig, AgentApiSummarizer, SummarisationError
 from .report.prompts import list_prompt_specs
@@ -224,6 +231,53 @@ def config_doctor_cmd(
     updated = config_doctor.append_blocks(config_path.read_text(), plan.blocks)
     output_path.write_text(updated)
     click.echo(f"Wrote {output_path}")
+
+
+@main.command("db-schema")
+@click.option("--write", "write_files", is_flag=True, help="Write the generated schema snapshot and migrations under sql/.")
+@click.option("--print", "print_sql", is_flag=True, help="Print the generated snapshot SQL to stdout.")
+def db_schema_cmd(write_files: bool, print_sql: bool) -> None:
+    """Validate or refresh the committed SQLite schema artifacts."""
+
+    root = Path(__file__).resolve().parent.parent
+    snapshot_sql = render_sqlite_snapshot()
+    migration_sql = {migration.version: render_migration_sql(migration) for migration in iter_migrations()}
+
+    if print_sql:
+        click.echo(snapshot_sql.rstrip())
+        return
+
+    if write_files:
+        snapshot_path, migration_paths = write_schema_artifacts(root)
+        click.echo(f"Wrote {snapshot_path}")
+        for path in migration_paths:
+            click.echo(f"Wrote {path}")
+        return
+
+    snapshot_path, migration_paths = committed_schema_paths(root)
+    expected_files = {snapshot_path: snapshot_sql}
+    for migration, path in zip(iter_migrations(), migration_paths):
+        expected_files[path] = migration_sql[migration.version]
+
+    mismatches: list[Path] = []
+    missing: list[Path] = []
+    for path, expected in expected_files.items():
+        if not path.exists():
+            missing.append(path)
+            continue
+        actual = path.read_text(encoding="utf-8")
+        if actual != expected:
+            mismatches.append(path)
+
+    if missing or mismatches:
+        messages: list[str] = []
+        if missing:
+            messages.append("Missing schema files:\n" + "\n".join(str(path) for path in missing))
+        if mismatches:
+            messages.append("Out-of-date schema files:\n" + "\n".join(str(path) for path in mismatches))
+        raise click.ClickException("\n\n".join(messages))
+
+    click.echo("Committed SQLite schema artifacts are up to date.")
 
 
 @main.command()

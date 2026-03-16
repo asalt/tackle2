@@ -9,9 +9,13 @@ util_tools <- new.env()
 source(file.path(here("R"), "utils.R"), local = util_tools)
 log_msg <- util_tools$make_partial(util_tools$log_msg)
 
-# Function to initialize the database from the SQL file
+LATEST_SCHEMA_VERSION <- 2L
+BASELINE_SCHEMA_VERSION <- 1L
+
+
 get_con <- function(db_path = file.path(here("sql"), "rankorder_data.db")){
   con <- dbConnect(RSQLite::SQLite(), db_path)
+  dbExecute(con, "PRAGMA foreign_keys = ON")
   return(con)
 }
 
@@ -19,29 +23,94 @@ close_con <- function(con){
   dbDisconnect(con)
 }
 
-initialize_db <- function(db_path = file.path(here("sql"), "rankorder_data.db"), sql_file = file.path(here("sql"), "init_db.sql")) {
-  log_msg(info="Initializing database...")
-  # Ensure parent directory exists for the db path
-  dir.create(dirname(db_path), recursive = TRUE, showWarnings = FALSE)
-  con <- dbConnect(RSQLite::SQLite(), db_path)
-  # Read the SQL commands from the file
-  sql_commands <- readLines(sql_file)
-  sql_commands <- Filter(\(x) !str_starts(x, '-') && !x=='', sql_commands)
-  # print(sql_commands)
-  sql_script <- paste(sql_commands, collapse = "")
-  sql_statements <- unlist(strsplit(sql_script, ";"))
+.read_sql_statements <- function(sql_file) {
+  sql_lines <- readLines(sql_file, warn = FALSE)
+  sql_lines <- gsub("--.*$", "", sql_lines)
+  sql_script <- paste(sql_lines, collapse = "\n")
+  sql_statements <- unlist(strsplit(sql_script, ";", fixed = TRUE), use.names = FALSE)
+  sql_statements <- sql_statements %>%
+    trimws() %>%
+    (\(x) x[nzchar(x)])()
+  return(sql_statements)
+}
 
-  # Execute each statement separately
-  for (statement in sql_statements) {
-    statement <- trimws(statement)
-    if (nchar(statement) > 0) {
-        log_msg(debug=statement)
-      dbExecute(con, statement)
-    }
+
+.execute_sql_file <- function(con, sql_file) {
+  for (statement in .read_sql_statements(sql_file)) {
+    log_msg(debug = statement)
+    dbExecute(con, statement)
   }
-  # dbExecute(con, "COMMIT")
-  dbDisconnect(con)
-  log_msg(info="Database initialized successfully.")
+}
+
+
+get_schema_version <- function(con) {
+  if (!dbExistsTable(con, "SchemaInfo")) {
+    return(BASELINE_SCHEMA_VERSION)
+  }
+  res <- dbGetQuery(
+    con,
+    "SELECT schema_version FROM SchemaInfo WHERE singleton_id = 1 LIMIT 1"
+  )
+  if (nrow(res) == 0 || is.na(res$schema_version[[1]])) {
+    return(BASELINE_SCHEMA_VERSION)
+  }
+  as.integer(res$schema_version[[1]])
+}
+
+
+.list_migration_files <- function(migrations_dir) {
+  if (!dir.exists(migrations_dir)) {
+    return(character())
+  }
+  files <- list.files(migrations_dir, pattern = "\\.sql$", full.names = TRUE)
+  versions <- suppressWarnings(as.integer(sub("^([0-9]+).*", "\\1", basename(files))))
+  files <- files[!is.na(versions)]
+  versions <- versions[!is.na(versions)]
+  files[order(versions)]
+}
+
+
+apply_pending_migrations <- function(con, migrations_dir = file.path(here("sql"), "migrations")) {
+  current_version <- get_schema_version(con)
+  migration_files <- .list_migration_files(migrations_dir)
+  if (length(migration_files) == 0) {
+    return(invisible(current_version))
+  }
+
+  for (migration_file in migration_files) {
+    version <- suppressWarnings(as.integer(sub("^([0-9]+).*", "\\1", basename(migration_file))))
+    if (is.na(version) || version <= current_version) {
+      next
+    }
+    log_msg(info = paste0("Applying migration ", basename(migration_file)))
+    .execute_sql_file(con, migration_file)
+    current_version <- version
+  }
+
+  invisible(current_version)
+}
+
+
+initialize_db <- function(
+  db_path = file.path(here("sql"), "rankorder_data.db"),
+  sql_file = file.path(here("sql"), "init_db.sql"),
+  migrations_dir = file.path(here("sql"), "migrations")
+) {
+  log_msg(info = "Initializing database...")
+  dir.create(dirname(db_path), recursive = TRUE, showWarnings = FALSE)
+  con <- get_con(db_path)
+  on.exit(dbDisconnect(con), add = TRUE)
+
+  existing_tables <- dbListTables(con)
+  is_fresh_db <- length(existing_tables) == 0
+
+  if (is_fresh_db) {
+    .execute_sql_file(con, sql_file)
+  } else {
+    apply_pending_migrations(con, migrations_dir = migrations_dir)
+  }
+
+  log_msg(info = paste0("Database initialized successfully at schema v", get_schema_version(con), "."))
 }
 
 
@@ -111,103 +180,387 @@ insert_pathway <- function(con, collection_id = NULL, collection_name = NULL, pa
 }
 
 
+.col_or_default <- function(df, cols, default_val = NA) {
+  for (col in cols) {
+    if (col %in% colnames(df)) return(df[[col]])
+  }
+  rep(default_val, nrow(df))
+}
+
+
+.normalize_numeric <- function(x) {
+  if (is.list(x)) {
+    x <- vapply(x, function(val) as.numeric(val)[1], numeric(1), USE.NAMES = FALSE)
+  }
+  suppressWarnings(as.numeric(x))
+}
+
+
+.normalize_integer <- function(x) {
+  if (is.list(x)) {
+    x <- vapply(x, function(val) as.integer(val)[1], integer(1), USE.NAMES = FALSE)
+  }
+  suppressWarnings(as.integer(x))
+}
+
+
+.normalize_logical_integer <- function(x) {
+  if (is.list(x)) {
+    x <- vapply(x, function(val) as.logical(val)[1], logical(1), USE.NAMES = FALSE)
+  }
+  suppressWarnings(as.integer(as.logical(x)))
+}
+
+
+.normalize_text <- function(x) {
+  if (is.list(x)) {
+    x <- vapply(
+      x,
+      function(val) paste(as.character(val), collapse = "/"),
+      character(1),
+      USE.NAMES = FALSE
+    )
+  }
+  as.character(x)
+}
+
+
+.split_joined_tokens <- function(value) {
+  if (length(value) == 0 || is.na(value) || !nzchar(value)) {
+    return(character())
+  }
+  value %>%
+    strsplit("[/,;]") %>%
+    unlist(use.names = FALSE) %>%
+    trimws() %>%
+    (\(x) x[nzchar(x)])()
+}
+
+
+.leading_edge_pairs <- function(raw_ids, gene_symbols) {
+  ids <- .split_joined_tokens(raw_ids)
+  symbols <- .split_joined_tokens(gene_symbols)
+  count <- max(length(ids), length(symbols))
+  if (count == 0) {
+    return(data.frame())
+  }
+
+  if (length(ids) < count) {
+    ids <- c(ids, rep(NA_character_, count - length(ids)))
+  }
+  if (length(symbols) < count) {
+    symbols <- c(symbols, rep(NA_character_, count - length(symbols)))
+  }
+
+  data.frame(
+    member_ordinal = seq_len(count),
+    bio_idstr = as.character(ids),
+    gene_symbol = as.character(symbols),
+    stringsAsFactors = FALSE
+  ) %>%
+    dplyr::filter(!is.na(bio_idstr) & nzchar(bio_idstr))
+}
+
+
+upsert_run_metadata <- function(
+  con,
+  savedir_path = NULL,
+  config_path = NULL,
+  species = NULL,
+  ranks_from = NULL
+) {
+  savedir_name <- if (!is.null(savedir_path) && nzchar(savedir_path)) basename(savedir_path) else NULL
+  config_sha256 <- NULL
+  if (!is.null(config_path) && nzchar(config_path) && file.exists(config_path)) {
+    config_sha256 <- digest::digest(config_path, algo = "sha256", file = TRUE)
+  }
+
+  metadata_params <- list(
+    run_id = 1L,
+    savedir_name = savedir_name,
+    savedir_path = savedir_path,
+    config_path = config_path,
+    config_sha256 = config_sha256,
+    species = species,
+    ranks_from = ranks_from
+  )
+
+  dbExecute(
+    conn = con,
+    statement = paste(
+      "INSERT INTO RunMetadata",
+      "(run_id, savedir_name, savedir_path, config_path, config_sha256, species, ranks_from, updated_at)",
+      "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+      "ON CONFLICT(run_id) DO UPDATE SET",
+      "savedir_name=excluded.savedir_name,",
+      "savedir_path=excluded.savedir_path,",
+      "config_path=excluded.config_path,",
+      "config_sha256=excluded.config_sha256,",
+      "species=excluded.species,",
+      "ranks_from=excluded.ranks_from,",
+      "updated_at=CURRENT_TIMESTAMP"
+    ),
+    params = unname(metadata_params)
+  )
+
+  invisible(1L)
+}
+
+
+replace_leading_edge_members <- function(con, result_id, raw_ids = NULL, gene_symbols = NULL) {
+  if (is.null(result_id) || is.na(result_id)) {
+    return(invisible(NULL))
+  }
+
+  dbExecute(con, "DELETE FROM LeadingEdgeMembers WHERE result_id = ?", params = list(result_id))
+  pairs <- .leading_edge_pairs(raw_ids, gene_symbols)
+  if (nrow(pairs) == 0) {
+    return(invisible(NULL))
+  }
+
+  stmt <- dbSendStatement(
+    con,
+    paste(
+      "INSERT INTO LeadingEdgeMembers",
+      "(result_id, member_ordinal, bio_idstr, gene_symbol)",
+      "VALUES (?, ?, ?, ?)"
+    )
+  )
+  on.exit(dbClearResult(stmt), add = TRUE)
+  for (i in seq_len(nrow(pairs))) {
+    dbBind(
+      stmt,
+      list(
+        result_id,
+        pairs$member_ordinal[[i]],
+        pairs$bio_idstr[[i]],
+        pairs$gene_symbol[[i]]
+      )
+    )
+  }
+
+  invisible(NULL)
+}
+
+
+.resolve_rankobj_id <- function(con, rankobj_id = NULL, rank_name = NULL) {
+  if (!is.null(rankobj_id)) {
+    return(rankobj_id)
+  }
+  if (is.null(rank_name)) {
+    stop("both rankobj_id and rank_name cannot be null")
+  }
+
+  sql <- "SELECT rankobj_id from RankObjects where name = ? LIMIT 1"
+  res <- dbGetQuery(con, sql, params = rank_name)
+  if (nrow(res) == 0) {
+    warning("no rank name found, creating")
+    return(insert_rankobj(con = con, rank_name = rank_name))
+  }
+
+  res$rankobj_id[1]
+}
+
+
+.resolve_collection_id <- function(con, collection_id = NULL, collection_name = NULL) {
+  if (!is.null(collection_id)) {
+    return(collection_id)
+  }
+  if (is.null(collection_name)) {
+    stop("both collection_id and collection_name cannot be null")
+  }
+
+  sql <- "SELECT collection_id from Collections where name = ? LIMIT 1"
+  res <- dbGetQuery(con, sql, params = collection_name)
+  if (nrow(res) == 0) {
+    warning("no collection name found, creating")
+    return(insert_collection(con = con, collection_name = collection_name))
+  }
+
+  res$collection_id[1]
+}
+
+
+.build_collection_result_vectors <- function(results) {
+  list(
+    pathway = results %>%
+      .col_or_default(cols = c("pathway"), default_val = "") %>%
+      as.character(),
+    pval = results %>%
+      .col_or_default(cols = c("pval", "PVAL"), default_val = NA_real_) %>%
+      .normalize_numeric(),
+    padj = results %>%
+      .col_or_default(cols = c("padj", "PADJ"), default_val = NA_real_) %>%
+      .normalize_numeric(),
+    log2err = results %>%
+      .col_or_default(cols = c("log2err", "LOG2ERR"), default_val = NA_real_) %>%
+      .normalize_numeric(),
+    es = results %>%
+      .col_or_default(cols = c("es", "ES"), default_val = NA_real_) %>%
+      .normalize_numeric(),
+    nes = results %>%
+      .col_or_default(cols = c("nes", "NES"), default_val = NA_real_) %>%
+      .normalize_numeric(),
+    size = results %>%
+      .col_or_default(cols = c("size", "SIZE"), default_val = NA_integer_) %>%
+      .normalize_integer(),
+    mainpathway = results %>%
+      .col_or_default(cols = c("mainpathway", "main_pathway", "mainPathway"), default_val = NA) %>%
+      .normalize_logical_integer(),
+    leading_edge = results %>%
+      .col_or_default(cols = c("leadingEdge", "leading_edge", "leadingedge"), default_val = "") %>%
+      .normalize_text(),
+    leading_edge_genesymbol = results %>%
+      .col_or_default(cols = c("leadingEdge_genesymbol", "leading_edge_genesymbol"), default_val = "") %>%
+      .normalize_text(),
+    peak_rank_pct = results %>%
+      .col_or_default(cols = c("peak_rank_pct"), default_val = NA_real_) %>%
+      .normalize_numeric(),
+    leading_edge_fraction = results %>%
+      .col_or_default(cols = c("leading_edge_fraction"), default_val = NA_real_) %>%
+      .normalize_numeric(),
+    leading_edge_span_pct = results %>%
+      .col_or_default(cols = c("leading_edge_span_pct"), default_val = NA_real_) %>%
+      .normalize_numeric(),
+    front_loaded_score = results %>%
+      .col_or_default(cols = c("front_loaded_score"), default_val = NA_real_) %>%
+      .normalize_numeric()
+  )
+}
+
+
+.collection_result_upsert_sql <- function() {
+  paste(
+    "INSERT INTO CollectionResults",
+    "(rankobj_id, collection_id, pathway_id, pathway, pval, padj, log2err, es, nes, size, leadingEdge, leadingEdge_genesymbol, mainpathway, peak_rank_pct, leading_edge_fraction, leading_edge_span_pct, front_loaded_score)",
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "ON CONFLICT(collection_id, rankobj_id, pathway_id) DO UPDATE SET",
+    "pathway=excluded.pathway,",
+    "pval=excluded.pval,",
+    "padj=excluded.padj,",
+    "log2err=excluded.log2err,",
+    "es=excluded.es,",
+    "nes=excluded.nes,",
+    "size=excluded.size,",
+    "leadingEdge=excluded.leadingEdge,",
+    "leadingEdge_genesymbol=excluded.leadingEdge_genesymbol,",
+    "mainpathway=excluded.mainpathway,",
+    "peak_rank_pct=excluded.peak_rank_pct,",
+    "leading_edge_fraction=excluded.leading_edge_fraction,",
+    "leading_edge_span_pct=excluded.leading_edge_span_pct,",
+    "front_loaded_score=excluded.front_loaded_score,",
+    "stored_at=CURRENT_TIMESTAMP"
+  )
+}
+
+
+.collection_result_row_params <- function(
+  rankobj_id,
+  collection_id,
+  pathway_id,
+  row_index,
+  result_vectors
+) {
+  list(
+    rankobj_id = rankobj_id,
+    collection_id = collection_id,
+    pathway_id = pathway_id,
+    pathway = result_vectors$pathway[[row_index]],
+    pval = result_vectors$pval[[row_index]],
+    padj = result_vectors$padj[[row_index]],
+    log2err = result_vectors$log2err[[row_index]],
+    es = result_vectors$es[[row_index]],
+    nes = result_vectors$nes[[row_index]],
+    size = result_vectors$size[[row_index]],
+    leading_edge = result_vectors$leading_edge[[row_index]],
+    leading_edge_genesymbol = result_vectors$leading_edge_genesymbol[[row_index]],
+    mainpathway = result_vectors$mainpathway[[row_index]],
+    peak_rank_pct = result_vectors$peak_rank_pct[[row_index]],
+    leading_edge_fraction = result_vectors$leading_edge_fraction[[row_index]],
+    leading_edge_span_pct = result_vectors$leading_edge_span_pct[[row_index]],
+    front_loaded_score = result_vectors$front_loaded_score[[row_index]]
+  )
+}
+
+
+.get_collection_result_id <- function(con, rankobj_id, collection_id, pathway_id) {
+  dbGetQuery(
+    con,
+    paste(
+      "SELECT result_id FROM CollectionResults",
+      "WHERE collection_id = ? AND rankobj_id = ? AND pathway_id = ?",
+      "LIMIT 1"
+    ),
+    params = list(collection_id, rankobj_id, pathway_id)
+  )$result_id[[1]]
+}
+
+
 insert_results <- function(con, rankobj_id = NULL, rank_name = NULL, collection_id = NULL, collection_name = NULL, results = NULL){
 
   if (is.null(results) || !is.data.frame(results)) stop("results must be a data.frame")
 
-  # Resolve rankobj_id
-  if (is.null(rankobj_id)) {
-      if (is.null(rank_name)) stop("both rankobj_id and rank_name cannot be null")
-      sql <- "SELECT rankobj_id from RankObjects where name = ? LIMIT 1"
-      res <- dbGetQuery(con, sql, params = rank_name)
-      if (nrow(res) == 0){
-        warning("no rank name found, creating")
-        rankobj_id <- insert_rankobj(con, rank_name)
-      } else {
-        rankobj_id <- res$rankobj_id[1]
-      }
-  }
-
-  # Resolve collection_id
-  if (is.null(collection_id)) {
-      if (is.null(collection_name)) stop("both collection_id and collection_name cannot be null")
-      sql <- "SELECT collection_id from Collections where name = ? LIMIT 1"
-      res <- dbGetQuery(con, sql, params = collection_name)
-      if (nrow(res) == 0){
-        warning("no collection name found, creating")
-        collection_id <- insert_collection(con, collection_name)
-      } else {
-        collection_id <- res$collection_id[1]
-      }
-  }
+  rankobj_id <- .resolve_rankobj_id(
+    con = con,
+    rankobj_id = rankobj_id,
+    rank_name = rank_name
+  )
+  collection_id <- .resolve_collection_id(
+    con = con,
+    collection_id = collection_id,
+    collection_name = collection_name
+  )
 
   on.exit({
     dbRollback(con)
     message("Transaction rolled back due to an error.")
   }, add = TRUE)
 
-  col_or_default <- function(df, cols, default_val = NA) {
-    for (col in cols) {
-      if (col %in% colnames(df)) return(df[[col]])
-    }
-    rep(default_val, nrow(df))
-  }
-  normalize_numeric <- function(x) {
-    if (is.list(x)) {
-      x <- vapply(x, function(val) as.numeric(val)[1], numeric(1), USE.NAMES = FALSE)
-    }
-    suppressWarnings(as.numeric(x))
-  }
-
-  pathway_vals <- as.character(col_or_default(results, c("pathway"), ""))
-  pval_vals <- normalize_numeric(col_or_default(results, c("pval", "PVAL"), NA_real_))
-  padj_vals <- normalize_numeric(col_or_default(results, c("padj", "PADJ"), NA_real_))
-  log2err_vals <- normalize_numeric(col_or_default(results, c("log2err", "LOG2ERR"), NA_real_))
-  es_vals <- normalize_numeric(col_or_default(results, c("es", "ES"), NA_real_))
-  nes_vals <- normalize_numeric(col_or_default(results, c("nes", "NES"), NA_real_))
-  size_vals <- suppressWarnings(as.integer(col_or_default(results, c("size", "SIZE"), NA_integer_)))
-  main_vals <- col_or_default(results, c("mainpathway", "main_pathway", "mainPathway"), NA)
-  if (is.list(main_vals)) {
-    main_vals <- vapply(main_vals, function(val) as.logical(val)[1], logical(1), USE.NAMES = FALSE)
-  }
-  main_vals <- suppressWarnings(as.integer(as.logical(main_vals)))
-  leading_vals <- col_or_default(results, c("leadingEdge", "leading_edge", "leadingedge"), "")
-  if (is.list(leading_vals)) {
-    leading_vals <- vapply(leading_vals, function(val) paste(val, collapse = "/"), character(1), USE.NAMES = FALSE)
-  }
-  leading_vals <- as.character(leading_vals)
+  result_vectors <- .build_collection_result_vectors(results = results)
 
   dbBegin(con)
-  stmt <- dbSendStatement(
-    con,
-    "INSERT OR REPLACE INTO CollectionResults (rankobj_id, collection_id, pathway_id, pathway, pval, padj, log2err, es, nes, size, leadingEdge, mainpathway) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-  )
+  sql_upsert <- .collection_result_upsert_sql()
   for (i in seq_len(nrow(results))) {
-    pathway_name <- pathway_vals[i]
-    pathway_id <- get_pathway_id(con, pathway_name, collection_id = collection_id)
+    pathway_name <- result_vectors$pathway[[i]]
+    pathway_id <- get_pathway_id(
+      con = con,
+      pathway_name = pathway_name,
+      collection_id = collection_id
+    )
     if (is.null(pathway_id)) {
-      pathway_id <- insert_pathway(con, collection_id = collection_id, pathway_name = pathway_name)
-    }
-    dbBind(stmt,
-      list(
-        rankobj_id,
-        collection_id,
-        pathway_id,
-        pathway_name,
-        pval_vals[i],
-        padj_vals[i],
-        log2err_vals[i],
-        es_vals[i],
-        nes_vals[i],
-        size_vals[i],
-        leading_vals[i],
-        main_vals[i]
+      pathway_id <- insert_pathway(
+        con = con,
+        collection_id = collection_id,
+        pathway_name = pathway_name
       )
+    }
+
+    row_params <- .collection_result_row_params(
+      rankobj_id = rankobj_id,
+      collection_id = collection_id,
+      pathway_id = pathway_id,
+      row_index = i,
+      result_vectors = result_vectors
+    )
+    dbExecute(
+      conn = con,
+      statement = sql_upsert,
+      params = unname(row_params)
+    )
+    result_id <- .get_collection_result_id(
+      con = con,
+      rankobj_id = rankobj_id,
+      collection_id = collection_id,
+      pathway_id = pathway_id
+    )
+    replace_leading_edge_members(
+      con,
+      result_id = result_id,
+      raw_ids = row_params$leading_edge,
+      gene_symbols = row_params$leading_edge_genesymbol
     )
     if (i %% 1000 == 0) cat("Inserted row", i, "\n")
   }
-
-  dbClearResult(stmt)
   dbExecute(con, "COMMIT")
   message("Bulk insert with prepared statements completed.")
   on.exit(NULL, add = FALSE)

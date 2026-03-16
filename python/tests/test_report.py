@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from click.testing import CliRunner
 from python.cli import main
 from python.report.generator import generate_report
 from python.report import assets, catalog, summary as report_summary
+from python.sqlite_schema import render_sqlite_snapshot
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -70,6 +72,76 @@ def _build_minimal_savedir(tmp_path: Path) -> Path:
         + "\n",
         encoding="utf-8",
     )
+    return savedir
+
+
+def _build_sqlite_savedir(tmp_path: Path) -> Path:
+    savedir = tmp_path / "sqlite_savedir"
+    savedir.mkdir(parents=True, exist_ok=True)
+    (savedir / "run.log").write_text("sqlite example log\n", encoding="utf-8")
+    db_path = savedir / "gsea_results.sqlite"
+    with sqlite3.connect(db_path) as con:
+        con.executescript(render_sqlite_snapshot())
+        con.execute("INSERT INTO Collections (name) VALUES (?)", ("H",))
+        collection_id = con.execute(
+            "SELECT collection_id FROM Collections WHERE name = ?",
+            ("H",),
+        ).fetchone()[0]
+        con.execute(
+            "INSERT INTO RankObjects (name, species) VALUES (?, ?)",
+            ("group_A", "Homo sapiens"),
+        )
+        rankobj_id = con.execute(
+            "SELECT rankobj_id FROM RankObjects WHERE name = ?",
+            ("group_A",),
+        ).fetchone()[0]
+        con.execute(
+            "INSERT INTO Pathways (name, ids, collection_id) VALUES (?, ?, ?)",
+            ("HALLMARK_APOPTOSIS", "7157/581", collection_id),
+        )
+        pathway_id = con.execute(
+            "SELECT pathway_id FROM Pathways WHERE name = ? AND collection_id = ?",
+            ("HALLMARK_APOPTOSIS", collection_id),
+        ).fetchone()[0]
+        con.execute(
+            """
+            INSERT INTO CollectionResults (
+                rankobj_id, collection_id, pathway_id, pathway,
+                pval, padj, log2err, es, nes, size,
+                leadingEdge, leadingEdge_genesymbol, mainpathway,
+                peak_rank_pct, leading_edge_fraction, leading_edge_span_pct, front_loaded_score
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                rankobj_id,
+                collection_id,
+                pathway_id,
+                "HALLMARK_APOPTOSIS",
+                0.001,
+                0.01,
+                0.1,
+                0.9,
+                2.0,
+                12,
+                "7157/581",
+                "TP53/BAX",
+                1,
+                0.125,
+                0.33,
+                0.04,
+                16.0,
+            ),
+        )
+        result_id = con.execute("SELECT result_id FROM CollectionResults").fetchone()[0]
+        con.execute(
+            "INSERT INTO LeadingEdgeMembers (result_id, member_ordinal, bio_idstr, gene_symbol) VALUES (?, ?, ?, ?)",
+            (result_id, 1, "7157", "TP53"),
+        )
+        con.execute(
+            "INSERT INTO LeadingEdgeMembers (result_id, member_ordinal, bio_idstr, gene_symbol) VALUES (?, ?, ?, ?)",
+            (result_id, 2, "581", "BAX"),
+        )
+        con.commit()
     return savedir
 
 
@@ -412,6 +484,14 @@ def test_report_consumes_stored_summary_json(tmp_path):
     assert "AI Summaries" in ai_html
     assert "can make mistakes" in ai_html
     assert "llama3.1 tulu" in ai_html
+    assert "<link rel=\"stylesheet\"" not in ai_html
+    assert ".llm-summary {" in ai_html
+    assert "href=\"index.html\"" not in ai_html
+    assert "Contents" in ai_html
+    assert 'href="#run-overview"' in ai_html
+    assert 'id="run-overview"' in ai_html
+    assert 'id="collection-h"' in ai_html
+    assert 'id="comparison-h-group-a"' in ai_html
     assert "Precomputed run summary." in ai_html
     assert "Leading-edge genes point to an apoptosis-focused signal driven by TP53 and BAX." in ai_html
     assert str(savedir) not in ai_html
@@ -490,3 +570,22 @@ def test_list_summary_prompts_command():
     assert "collection_summary" in result.output
     assert "comparison_summary" in result.output
     assert "leading_edge_summary" in result.output
+
+
+def test_generate_report_reads_sqlite_when_tables_are_absent(tmp_path):
+    savedir = _build_sqlite_savedir(tmp_path)
+    output_dir = tmp_path / "sqlite_report"
+
+    index_path = generate_report(savedir=savedir, output=output_dir)
+
+    html = index_path.read_text(encoding="utf-8")
+    assert "HALLMARK_APOPTOSIS" in html
+    assert "group A" in html
+    assert "Download table" not in html
+
+
+def test_db_schema_command_reports_up_to_date():
+    runner = CliRunner()
+    result = runner.invoke(main, ["db-schema"], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    assert "up to date" in result.output.lower()

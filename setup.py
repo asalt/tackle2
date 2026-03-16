@@ -10,8 +10,10 @@ setup(
     },
     install_requires=[
         "Click",
-        "ollama",
         "jinja2",
+        "ollama",
+        "pandas",
+        "SQLAlchemy",
     ],
     entry_points={
         "console_scripts": [
