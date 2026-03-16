@@ -1,170 +1,149 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>tackle2 Report — {{ savedir_name }}</title>
-  <link rel="stylesheet" href="static/report.css">
-  <style type="text/css">
-    html, body {
-      width: 100% !important;
-      max-width: 100% !important;
-      margin: 0;
-      padding: 0;
-    }
-    .main-container {
-      max-width: 100% !important;
-      margin: auto;
-    }
-    main.main-container {
-      width: 100%;
-      padding: 1.6rem 1rem 3rem 1rem;
-      box-sizing: border-box;
-    }
-  </style>
-</head>
-<body>
-  <main class="main-container">
-  <header>
-    <h1>tackle2 Summary</h1>
-    <p class="subtitle">{{ savedir_name }}</p>
-    <p class="meta">Generated {{ generated_at }} from <code>{{ savedir_path }}</code></p>
-    {% if config_path %}
-    <p class="meta">Config: <code>{{ config_path }}</code></p>
-    {% endif %}
-  </header>
+{% extends "base_report.html.j2" %}
 
-  {% if llm_summary %}
-  <section class="llm-summary">
-    <h2>AI Overview</h2>
-    <p>{{ llm_summary.text }}</p>
-    {% if llm_summary.bullets %}
-    <ul>
-      {% for bullet in llm_summary.bullets %}
-      <li>{{ bullet }}</li>
-      {% endfor %}
-    </ul>
-    {% endif %}
-    {% if llm_summary.model %}
-    <p class="meta">Generated with {{ llm_summary.model }}</p>
-    {% endif %}
-  </section>
+{% block title %}tackle2 Report — {{ savedir_name }}{% endblock %}
+
+{% block content %}
+<header>
+  <h1>tackle2 Summary</h1>
+  <p class="subtitle">{{ savedir_name }}</p>
+  <p class="meta">Generated {{ generated_at }} from <code>{{ savedir_path }}</code></p>
+  {% if config_path %}
+  <p class="meta">Config: <code>{{ config_path }}</code></p>
   {% endif %}
+</header>
 
-  <section class="stats">
-    <div class="stat">
-      <div class="value">{{ stats.collections }}</div>
-      <div class="label">Collections</div>
-    </div>
-    <div class="stat">
-      <div class="value">{{ stats.comparisons }}</div>
-      <div class="label">Comparisons</div>
-    </div>
-    <div class="stat">
-      <div class="value">{{ stats.tables }}</div>
-      <div class="label">GSEA tables</div>
-    </div>
-    <div class="stat">
-      <div class="value">{{ stats.significant_pathways }}</div>
-      <div class="label">Padj &lt; 0.05</div>
-    </div>
-  </section>
-
-  {% if collection_pages or ai_page %}
-  <nav class="collection-nav">
-    <h2>Pages</h2>
-    <ul>
-      {% for page in collection_pages %}
-      <li><a href="{{ page.href }}">{{ page.name }}</a></li>
-      {% endfor %}
-      {% if ai_page %}
-      <li><a href="{{ ai_page.href }}">{{ ai_page.name }}</a></li>
-      {% endif %}
-    </ul>
-  </nav>
-  {% endif %}
-
-  {% if plots %}
-  <section>
-    <h2>Plots</h2>
-    <p>First {{ plots|length }} plot files discovered. Open links to view original PDFs/SVGs/PNGs.</p>
-    <ul class="file-list plots">
-      {% for plot in plots %}
-      <li>
-        <a href="{{ savedir_relprefix }}/{{ plot.path.as_posix() }}">{{ plot.name }}</a>
-        {% if plot.preview %}
-        <div class="preview"><a href="{{ savedir_relprefix }}/{{ plot.path.as_posix() }}"><img src="{{ plot.preview }}" alt="Preview of {{ plot.name }}"></a></div>
-        {% endif %}
-      </li>
-      {% endfor %}
-    </ul>
-  </section>
-  {% endif %}
-
-  {% if has_tables %}
-  <section>
-    <h2>Enrichment Highlights</h2>
-    {% for collection in collections %}
-      <article class="collection">
-        <h3>{{ collection.display_name }}</h3>
-        {% for comparison in collection.comparisons %}
-          <div class="comparison">
-            <header>
-              <h4>{{ comparison.display_name }}</h4>
-              <p class="meta">
-                {{ comparison.significant_pathways }} significant of {{ comparison.total_pathways }} pathways
-                · <a href="{{ savedir_relprefix }}/{{ comparison.relative_path.as_posix() }}">Download table</a>
-              </p>
-            </header>
-            {% if comparison.top_pathways %}
-            <table>
-              <thead>
-                <tr>
-                  <th>Pathway</th>
-                  <th>NES</th>
-                  <th>Padj</th>
-                  <th>Leading genes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for pathway in comparison.top_pathways %}
-                <tr>
-                  <td>{{ pathway.pathway }}</td>
-                  <td>{{ "%.2f"|format(pathway.nes) if pathway.nes is not none else "NA" }}</td>
-                  <td>{{ "%.3g"|format(pathway.padj) if pathway.padj is not none else "NA" }}</td>
-                  <td>{{ pathway.leading_genes }}</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-            {% else %}
-            <p class="meta">No pathways available in summary.</p>
-            {% endif %}
-          </div>
-        {% endfor %}
-      </article>
+{% if llm_summary %}
+<section class="llm-summary">
+  <h2>AI Overview</h2>
+  <p>{{ llm_summary.text }}</p>
+  {% if llm_summary.bullets %}
+  <ul>
+    {% for bullet in llm_summary.bullets %}
+    <li>{{ bullet }}</li>
     {% endfor %}
-  </section>
-  {% else %}
-  <section>
-    <h2>No enrichment tables found</h2>
-    <p>We could not locate <code>gsea_tables</code>. Ensure the tackle2 run completed successfully.</p>
-  </section>
+  </ul>
   {% endif %}
+  {% if llm_summary.model %}
+  <p class="meta">Generated with {{ llm_summary.model }}</p>
+  {% endif %}
+</section>
+{% endif %}
 
-  {% if logs %}
-  <section>
-    <h2>Logs &amp; Notes</h2>
-    <ul class="file-list">
-      {% for log in logs %}
-      <li><a href="{{ savedir_relprefix }}/{{ log.path.as_posix() }}">{{ log.name }}</a></li>
+<section class="stats">
+  <div class="stat">
+    <div class="value">{{ stats.collections }}</div>
+    <div class="label">Collections</div>
+  </div>
+  <div class="stat">
+    <div class="value">{{ stats.comparisons }}</div>
+    <div class="label">Comparisons</div>
+  </div>
+  <div class="stat">
+    <div class="value">{{ stats.tables }}</div>
+    <div class="label">GSEA tables</div>
+  </div>
+  <div class="stat">
+    <div class="value">{{ stats.significant_pathways }}</div>
+    <div class="label">Padj &lt; 0.05</div>
+  </div>
+</section>
+
+{% if collection_pages or ai_page %}
+<nav class="collection-nav">
+  <h2>Pages</h2>
+  <ul>
+    {% for page in collection_pages %}
+    <li><a href="{{ page.href }}">{{ page.name }}</a></li>
+    {% endfor %}
+    {% if ai_page %}
+    <li><a href="{{ ai_page.href }}">{{ ai_page.name }}</a></li>
+    {% endif %}
+  </ul>
+</nav>
+{% endif %}
+
+{% if plots %}
+<section>
+  <h2>Plots</h2>
+  <p>First {{ plots|length }} plot files discovered. Open links to view original PDFs/SVGs/PNGs.</p>
+  <ul class="file-list plots">
+    {% for plot in plots %}
+    <li>
+      <a href="{{ savedir_relprefix }}/{{ plot.path.as_posix() }}">{{ plot.name }}</a>
+      {% if plot.preview %}
+      <div class="preview"><a href="{{ savedir_relprefix }}/{{ plot.path.as_posix() }}"><img src="{{ plot.preview }}" alt="Preview of {{ plot.name }}"></a></div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if has_tables %}
+<section>
+  <h2>Enrichment Highlights</h2>
+  {% for collection in collections %}
+    <article class="collection">
+      <h3>{{ collection.display_name }}</h3>
+      {% for comparison in collection.comparisons %}
+        <div class="comparison">
+          <header>
+            <h4>{{ comparison.display_name }}</h4>
+            <p class="meta">
+              {{ comparison.significant_pathways }} significant of {{ comparison.total_pathways }} pathways
+              {% if comparison.relative_path %}
+              · <a href="{{ savedir_relprefix }}/{{ comparison.relative_path.as_posix() }}">Download table</a>
+              {% endif %}
+            </p>
+          </header>
+          {% if comparison.top_pathways %}
+          <table>
+            <thead>
+              <tr>
+                <th>Pathway</th>
+                <th>NES</th>
+                <th>Padj</th>
+                <th>Leading genes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for pathway in comparison.top_pathways %}
+              <tr>
+                <td>{{ pathway.pathway }}</td>
+                <td>{{ "%.2f"|format(pathway.nes) if pathway.nes is not none else "NA" }}</td>
+                <td>{{ "%.3g"|format(pathway.padj) if pathway.padj is not none else "NA" }}</td>
+                <td>{{ pathway.leading_genes }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          <p class="meta">No pathways available in summary.</p>
+          {% endif %}
+        </div>
       {% endfor %}
-    </ul>
-  </section>
-  {% endif %}
+    </article>
+  {% endfor %}
+</section>
+{% else %}
+<section>
+  <h2>No enrichment tables found</h2>
+  <p>We could not locate <code>gsea_tables</code>. Ensure the tackle2 run completed successfully.</p>
+</section>
+{% endif %}
 
-  <footer>
-    <p>Static report generated by tackle2.</p>
-  </footer>
-  </main>
-</body>
-</html>
+{% if logs %}
+<section>
+  <h2>Logs &amp; Notes</h2>
+  <ul class="file-list">
+    {% for log in logs %}
+    <li><a href="{{ savedir_relprefix }}/{{ log.path.as_posix() }}">{{ log.name }}</a></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<footer>
+  <p>Static report generated by tackle2.</p>
+</footer>
+{% endblock %}

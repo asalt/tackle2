@@ -15,6 +15,7 @@ COLLECTION_TEMPLATE_NAME = "collection.html.j2"
 COMPARISON_TEMPLATE_NAME = "comparison.html.j2"
 AI_TEMPLATE_NAME = "ai_summary.html.j2"
 TEMPLATE_PACKAGE = __package__
+REPORT_CSS_NAME = "report.css"
 
 
 @lru_cache(maxsize=1)
@@ -49,7 +50,17 @@ def render_comparison(context: dict) -> str:
 def render_ai_summary(context: dict) -> str:
     env = _environment()
     template = env.get_template(AI_TEMPLATE_NAME)
-    return template.render(**context)
+    render_context = dict(context)
+    render_context.setdefault("inline_css", _report_css_text())
+    render_context.setdefault("show_links", False)
+    render_context.setdefault("back_href", None)
+    return template.render(**render_context)
+
+
+@lru_cache(maxsize=1)
+def _report_css_text() -> str:
+    static_dir = resources.files(TEMPLATE_PACKAGE) / "static"
+    return (static_dir / REPORT_CSS_NAME).read_text(encoding="utf-8")
 
 
 def install_static_assets(destination: Path, *, force: bool = False) -> None:

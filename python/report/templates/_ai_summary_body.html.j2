@@ -1,0 +1,80 @@
+{% for collection in collection_sections %}
+<section class="collection" id="{{ collection.anchor_id }}">
+  <header>
+    <h2>
+      {% if show_links and collection.href %}
+      <a href="{{ collection.href }}">{{ collection.name }}</a>
+      {% else %}
+      {{ collection.name }}
+      {% endif %}
+    </h2>
+  </header>
+
+  {% if collection.summary %}
+  <article class="llm-summary">
+    <h3>Collection Summary</h3>
+    <p>{{ collection.summary.text }}</p>
+    {% if collection.summary.bullets %}
+    <ul>
+      {% for bullet in collection.summary.bullets %}
+      <li>{{ bullet }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </article>
+  {% endif %}
+
+  {% for comparison in collection.comparisons %}
+  <article class="comparison" id="{{ comparison.anchor_id }}">
+    <header>
+      <h3>
+        {% if show_links and comparison.href %}
+        <a href="{{ comparison.href }}">{{ comparison.name }}</a>
+        {% else %}
+        {{ comparison.name }}
+        {% endif %}
+      </h3>
+    </header>
+
+    {% if comparison.summary %}
+    <div class="llm-summary">
+      <h4>Comparison Summary</h4>
+      <p>{{ comparison.summary.text }}</p>
+      {% if comparison.summary.bullets %}
+      <ul>
+        {% for bullet in comparison.summary.bullets %}
+        <li>{{ bullet }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if comparison.leading_edges %}
+    <div class="llm-summary">
+      <h4>Leading-Edge Notes</h4>
+      {% for pathway in comparison.leading_edges %}
+      <article class="comparison">
+        <header>
+          <h5>{{ pathway.name }}</h5>
+          <p class="meta">
+            NES {{ "%.2f"|format(pathway.nes) if pathway.nes is not none else "NA" }}
+            · Padj {{ "%.3g"|format(pathway.padj) if pathway.padj is not none else "NA" }}
+          </p>
+        </header>
+        <p>{{ pathway.summary.text }}</p>
+        {% if pathway.summary.bullets %}
+        <ul>
+          {% for bullet in pathway.summary.bullets %}
+          <li>{{ bullet }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </article>
+  {% endfor %}
+</section>
+{% endfor %}

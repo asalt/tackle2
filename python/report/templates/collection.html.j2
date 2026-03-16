@@ -1,155 +1,134 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>{{ collection.display_name }} — {{ savedir_name }} Report</title>
-  <link rel="stylesheet" href="{{ static_href }}">
-  <style type="text/css">
-    html, body {
-      width: 100% !important;
-      max-width: 100% !important;
-      margin: 0;
-      padding: 0;
-    }
-    .main-container {
-      max-width: 100% !important;
-      margin: auto;
-    }
-    main.main-container {
-      width: 100%;
-      padding: 1.6rem 1rem 3rem 1rem;
-      box-sizing: border-box;
-    }
-  </style>
-</head>
-<body>
-  <main class="main-container">
-  <header>
-    <p class="meta"><a href="{{ back_href }}">← Back to Summary</a></p>
-   <h1>{{ collection.display_name }}</h1>
-    <p class="subtitle">{{ savedir_name }}</p>
-    <p class="meta">Generated {{ generated_at }} from <code>{{ savedir_path }}</code></p>
-  </header>
+{% extends "base_report.html.j2" %}
 
-  {% if collection.llm_summary %}
-  <section class="llm-summary">
-    <h2>AI Summary</h2>
-    <p>{{ collection.llm_summary.text }}</p>
-    {% if collection.llm_summary.bullets %}
-    <ul>
-      {% for bullet in collection.llm_summary.bullets %}
-      <li>{{ bullet }}</li>
-      {% endfor %}
-    </ul>
-    {% endif %}
-    {% if collection.llm_summary.model %}
-    <p class="meta">Generated with {{ collection.llm_summary.model }}</p>
-    {% endif %}
-  </section>
-  {% endif %}
+{% block title %}{{ collection.display_name }} — {{ savedir_name }} Report{% endblock %}
 
-  <section class="stats">
-    <div class="stat">
-      <div class="value">{{ stats.total_comparisons }}</div>
-      <div class="label">Comparisons</div>
-    </div>
-    <div class="stat">
-      <div class="value">{{ stats.total_pathways }}</div>
-      <div class="label">Pathways</div>
-    </div>
-    <div class="stat">
-      <div class="value">{{ stats.significant_pathways }}</div>
-      <div class="label">Padj &lt; 0.05</div>
-    </div>
-  </section>
+{% block content %}
+<header>
+  <p class="meta"><a href="{{ back_href }}">← Back to Summary</a></p>
+  <h1>{{ collection.display_name }}</h1>
+  <p class="subtitle">{{ savedir_name }}</p>
+  <p class="meta">Generated {{ generated_at }} from <code>{{ savedir_path }}</code></p>
+</header>
 
-  <section>
-    <h2>Comparisons</h2>
-    {% if comparison_pages %}
-    <nav class="collection-nav">
-      <ul>
-        {% for link in comparison_pages %}
-        <li><a href="{{ link.href }}">{{ link.name }}</a></li>
-        {% endfor %}
-      </ul>
-    </nav>
-    {% endif %}
-
-    {% for comparison in collection.comparisons %}
-      <article class="comparison">
-        <header>
-          <h3>{{ comparison.display_name }}</h3>
-          <p class="meta">
-            {{ comparison.significant_pathways }} significant of {{ comparison.total_pathways }} pathways
-            · <a href="{{ savedir_relprefix }}/{{ comparison.relative_path.as_posix() }}">Download table</a>
-            {% set detail_href = comparison_detail_map.get(comparison.identifier) %}
-            {% if detail_href %}
-              · <a href="{{ detail_href }}">View plots</a>
-            {% endif %}
-          </p>
-        </header>
-        {% if comparison.top_pathways %}
-        <table>
-          <thead>
-            <tr>
-              <th>Pathway</th>
-              <th>NES</th>
-              <th>Padj</th>
-              <th>Leading genes</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for pathway in comparison.top_pathways %}
-            <tr>
-              <td>{{ pathway.pathway }}</td>
-              <td>{{ "%.2f"|format(pathway.nes) if pathway.nes is not none else "NA" }}</td>
-              <td>{{ "%.3g"|format(pathway.padj) if pathway.padj is not none else "NA" }}</td>
-              <td>{{ pathway.leading_genes }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-        {% else %}
-        <p class="meta">No pathways available in summary.</p>
-        {% endif %}
-      </article>
+{% if collection.llm_summary %}
+<section class="llm-summary">
+  <h2>AI Summary</h2>
+  <p>{{ collection.llm_summary.text }}</p>
+  {% if collection.llm_summary.bullets %}
+  <ul>
+    {% for bullet in collection.llm_summary.bullets %}
+    <li>{{ bullet }}</li>
     {% endfor %}
-  </section>
+  </ul>
+  {% endif %}
+  {% if collection.llm_summary.model %}
+  <p class="meta">Generated with {{ collection.llm_summary.model }}</p>
+  {% endif %}
+</section>
+{% endif %}
 
-  {% if plot_groups %}
-  {% for group in plot_groups %}
-    {% if group.plots %}
-    <section>
-      <h2>{{ group.title }}</h2>
-      <ul class="file-list plots">
-        {% for plot in group.plots %}
-        <li>
-          <a href="{{ savedir_relprefix }}/{{ plot.path }}">{{ plot.name }}</a>
-          {% if plot.preview %}
-          <div class="preview"><a href="{{ savedir_relprefix }}/{{ plot.path }}"><img src="{{ preview_relprefix }}/{{ plot.preview }}" alt="Preview of {{ plot.name }}"></a></div>
-          {% endif %}
-        </li>
-        {% endfor %}
-      </ul>
-    </section>
-    {% endif %}
-  {% endfor %}
+<section class="stats">
+  <div class="stat">
+    <div class="value">{{ stats.total_comparisons }}</div>
+    <div class="label">Comparisons</div>
+  </div>
+  <div class="stat">
+    <div class="value">{{ stats.total_pathways }}</div>
+    <div class="label">Pathways</div>
+  </div>
+  <div class="stat">
+    <div class="value">{{ stats.significant_pathways }}</div>
+    <div class="label">Padj &lt; 0.05</div>
+  </div>
+</section>
+
+<section>
+  <h2>Comparisons</h2>
+  {% if comparison_pages %}
+  <nav class="collection-nav">
+    <ul>
+      {% for link in comparison_pages %}
+      <li><a href="{{ link.href }}">{{ link.name }}</a></li>
+      {% endfor %}
+    </ul>
+  </nav>
   {% endif %}
 
-  {% if logs %}
+  {% for comparison in collection.comparisons %}
+    <article class="comparison">
+      <header>
+        <h3>{{ comparison.display_name }}</h3>
+        <p class="meta">
+          {{ comparison.significant_pathways }} significant of {{ comparison.total_pathways }} pathways
+          {% if comparison.relative_path %}
+          · <a href="{{ savedir_relprefix }}/{{ comparison.relative_path.as_posix() }}">Download table</a>
+          {% endif %}
+          {% set detail_href = comparison_detail_map.get(comparison.identifier) %}
+          {% if detail_href %}
+            · <a href="{{ detail_href }}">View plots</a>
+          {% endif %}
+        </p>
+      </header>
+      {% if comparison.top_pathways %}
+      <table>
+        <thead>
+          <tr>
+            <th>Pathway</th>
+            <th>NES</th>
+            <th>Padj</th>
+            <th>Leading genes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for pathway in comparison.top_pathways %}
+          <tr>
+            <td>{{ pathway.pathway }}</td>
+            <td>{{ "%.2f"|format(pathway.nes) if pathway.nes is not none else "NA" }}</td>
+            <td>{{ "%.3g"|format(pathway.padj) if pathway.padj is not none else "NA" }}</td>
+            <td>{{ pathway.leading_genes }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="meta">No pathways available in summary.</p>
+      {% endif %}
+    </article>
+  {% endfor %}
+</section>
+
+{% if plot_groups %}
+{% for group in plot_groups %}
+  {% if group.plots %}
   <section>
-    <h2>Logs &amp; Notes</h2>
-    <ul class="file-list">
-      {% for log in logs %}
-      <li><a href="{{ savedir_relprefix }}/{{ log.path }}">{{ log.name }}</a></li>
+    <h2>{{ group.title }}</h2>
+    <ul class="file-list plots">
+      {% for plot in group.plots %}
+      <li>
+        <a href="{{ savedir_relprefix }}/{{ plot.path }}">{{ plot.name }}</a>
+        {% if plot.preview %}
+        <div class="preview"><a href="{{ savedir_relprefix }}/{{ plot.path }}"><img src="{{ preview_relprefix }}/{{ plot.preview }}" alt="Preview of {{ plot.name }}"></a></div>
+        {% endif %}
+      </li>
       {% endfor %}
     </ul>
   </section>
   {% endif %}
+{% endfor %}
+{% endif %}
 
-  <footer>
-    <p>Static report generated by tackle2.</p>
-  </footer>
-  </main>
-</body>
-</html>
+{% if logs %}
+<section>
+  <h2>Logs &amp; Notes</h2>
+  <ul class="file-list">
+    {% for log in logs %}
+    <li><a href="{{ savedir_relprefix }}/{{ log.path }}">{{ log.name }}</a></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<footer>
+  <p>Static report generated by tackle2.</p>
+</footer>
+{% endblock %}

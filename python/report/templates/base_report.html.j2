@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}tackle2 Report{% endblock %}</title>
+  {% if inline_css %}
+  <style type="text/css">{{ inline_css | safe }}</style>
+  {% elif static_href %}
+  <link rel="stylesheet" href="{{ static_href }}">
+  {% endif %}
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+  <main class="main-container">
+  {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

@@ -17,6 +17,7 @@ import click
 
 from .. import export_packager
 from . import assets, catalog, summary, templating
+from .result_store import HybridResultStore
 from .summary_store import apply_stored_summaries, default_summary_dir
 
 if TYPE_CHECKING:
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+RESULT_STORE = HybridResultStore()
 
 
 class ReportGenerationError(RuntimeError):
@@ -198,9 +200,12 @@ def _build_ai_page_context(
     comparison_detail_maps: Dict[str, Dict[str, str]],
 ) -> Optional[Dict[str, Any]]:
     collection_sections: List[Dict[str, Any]] = []
+    toc_entries: List[Dict[str, Any]] = []
     for collection in collections:
         comparison_sections: List[Dict[str, Any]] = []
+        toc_children: List[Dict[str, str]] = []
         comparison_links = comparison_detail_maps.get(collection.identifier, {})
+        collection_slug = _slugify_token(collection.identifier, fallback="collection")
         for comparison in collection.comparisons:
             leading_edges = [
                 {
@@ -214,24 +219,42 @@ def _build_ai_page_context(
             ]
             if comparison.llm_summary is None and not leading_edges:
                 continue
+            comparison_slug = _slugify_token(comparison.identifier, fallback="comparison")
+            comparison_anchor = f"comparison-{collection_slug}-{comparison_slug}"
             comparison_sections.append(
                 {
                     "name": comparison.display_name,
                     "href": comparison_links.get(comparison.identifier),
+                    "anchor_id": comparison_anchor,
                     "summary": comparison.llm_summary,
                     "leading_edges": leading_edges,
+                }
+            )
+            toc_children.append(
+                {
+                    "label": comparison.display_name,
+                    "href": f"#{comparison_anchor}",
                 }
             )
 
         if collection.llm_summary is None and not comparison_sections:
             continue
 
+        collection_anchor = f"collection-{collection_slug}"
         collection_sections.append(
             {
                 "name": collection.display_name,
                 "href": collection_detail_map.get(collection.identifier),
+                "anchor_id": collection_anchor,
                 "summary": collection.llm_summary,
                 "comparisons": comparison_sections,
+            }
+        )
+        toc_entries.append(
+            {
+                "label": collection.display_name,
+                "href": f"#{collection_anchor}",
+                "children": toc_children,
             }
         )
 
@@ -245,6 +268,8 @@ def _build_ai_page_context(
         "savedir_name": context["savedir_name"],
         "savedir_path": context["savedir_path"],
         "generated_at": context["generated_at"],
+        "run_anchor": "run-overview" if run_summary is not None else None,
+        "toc_entries": toc_entries,
         "static_href": "static/report.css",
         "back_href": "index.html",
     }
@@ -263,7 +288,17 @@ def generate_report(
     paths = _resolve_paths(savedir=savedir, config=config, output=output)
 
     artefacts = catalog.scan_savedir(paths.savedir)
-    context = summary.build_context(paths.savedir, artefacts, config_path=paths.config_path)
+    comparison_records = RESULT_STORE.load_comparisons(
+        savedir=paths.savedir,
+        artefacts=artefacts,
+        config_path=paths.config_path,
+    )
+    context = summary.build_context(
+        paths.savedir,
+        artefacts,
+        config_path=paths.config_path,
+        comparison_records=comparison_records,
+    )
 
     collections = context.get("collections", [])
     resolved_summary_dir = Path(summary_dir).expanduser().resolve() if summary_dir else default_summary_dir(paths.savedir)

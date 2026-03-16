@@ -1,117 +1,94 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>{{ comparison.display_name }} — {{ collection.display_name }}</title>
-  <link rel="stylesheet" href="{{ static_href }}">
-  <style type="text/css">
-    html, body {
-      width: 100% !important;
-      max-width: 100% !important;
-      margin: 0;
-      padding: 0;
-    }
-    .main-container {
-      max-width: 100% !important;
-      margin: auto;
-    }
-    main.main-container {
-      width: 100%;
-      padding: 1.6rem 1rem 3rem 1rem;
-      box-sizing: border-box;
-    }
-  </style>
-</head>
-<body>
-  <main class="main-container">
-  <header>
-    <p class="meta"><a href="{{ back_href }}">← Back to {{ collection.display_name }}</a></p>
-    <h1>{{ comparison.display_name }}</h1>
-    <p class="subtitle">{{ collection.display_name }} · {{ savedir_name }}</p>
-    <p class="meta">Generated {{ generated_at }} from <code>{{ savedir_path }}</code></p>
-  </header>
+{% extends "base_report.html.j2" %}
 
-  {% if comparison.llm_summary %}
-  <section class="llm-summary">
-    <h2>AI Summary</h2>
-    <p>{{ comparison.llm_summary.text }}</p>
-    {% if comparison.llm_summary.bullets %}
+{% block title %}{{ comparison.display_name }} — {{ collection.display_name }}{% endblock %}
+
+{% block content %}
+<header>
+  <p class="meta"><a href="{{ back_href }}">← Back to {{ collection.display_name }}</a></p>
+  <h1>{{ comparison.display_name }}</h1>
+  <p class="subtitle">{{ collection.display_name }} · {{ savedir_name }}</p>
+  <p class="meta">Generated {{ generated_at }} from <code>{{ savedir_path }}</code></p>
+</header>
+
+{% if comparison.llm_summary %}
+<section class="llm-summary">
+  <h2>AI Summary</h2>
+  <p>{{ comparison.llm_summary.text }}</p>
+  {% if comparison.llm_summary.bullets %}
+  <ul>
+    {% for bullet in comparison.llm_summary.bullets %}
+    <li>{{ bullet }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if comparison.llm_summary.model %}
+  <p class="meta">Generated with {{ comparison.llm_summary.model }}</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% set pathway_summaries = comparison.top_pathways | selectattr('llm_summary') | list %}
+{% if pathway_summaries %}
+<section class="llm-summary">
+  <h2>Leading-Edge Notes</h2>
+  {% for pathway in pathway_summaries %}
+  <article class="comparison">
+    <header>
+      <h3>{{ pathway.pathway }}</h3>
+      <p class="meta">
+        NES {{ "%.2f"|format(pathway.nes) if pathway.nes is not none else "NA" }}
+        · Padj {{ "%.3g"|format(pathway.padj) if pathway.padj is not none else "NA" }}
+      </p>
+    </header>
+    <p>{{ pathway.llm_summary.text }}</p>
+    {% if pathway.llm_summary.bullets %}
     <ul>
-      {% for bullet in comparison.llm_summary.bullets %}
+      {% for bullet in pathway.llm_summary.bullets %}
       <li>{{ bullet }}</li>
       {% endfor %}
     </ul>
     {% endif %}
-    {% if comparison.llm_summary.model %}
-    <p class="meta">Generated with {{ comparison.llm_summary.model }}</p>
-    {% endif %}
-  </section>
-  {% endif %}
-
-  {% set pathway_summaries = comparison.top_pathways | selectattr('llm_summary') | list %}
-  {% if pathway_summaries %}
-  <section class="llm-summary">
-    <h2>Leading-Edge Notes</h2>
-    {% for pathway in pathway_summaries %}
-    <article class="comparison">
-      <header>
-        <h3>{{ pathway.pathway }}</h3>
-        <p class="meta">
-          NES {{ "%.2f"|format(pathway.nes) if pathway.nes is not none else "NA" }}
-          · Padj {{ "%.3g"|format(pathway.padj) if pathway.padj is not none else "NA" }}
-        </p>
-      </header>
-      <p>{{ pathway.llm_summary.text }}</p>
-      {% if pathway.llm_summary.bullets %}
-      <ul>
-        {% for bullet in pathway.llm_summary.bullets %}
-        <li>{{ bullet }}</li>
-        {% endfor %}
-      </ul>
-      {% endif %}
-    </article>
-    {% endfor %}
-  </section>
-  {% endif %}
-
-  {% if plot_groups %}
-  {% for group in plot_groups %}
-    {% if group.plots %}
-    <section>
-      <h2>{{ group.title }}</h2>
-      <ul class="file-list plots">
-        {% for plot in group.plots %}
-        <li>
-          <a href="{{ savedir_relprefix }}/{{ plot.path }}">{{ plot.name }}</a>
-          {% if plot.preview %}
-          <div class="preview"><a href="{{ savedir_relprefix }}/{{ plot.path }}"><img src="{{ preview_relprefix }}/{{ plot.preview }}" alt="Preview of {{ plot.name }}"></a></div>
-          {% endif %}
-        </li>
-        {% endfor %}
-      </ul>
-    </section>
-    {% endif %}
+  </article>
   {% endfor %}
-  {% else %}
-  <section>
-    <p class="meta">No plots available for this comparison.</p>
-  </section>
-  {% endif %}
+</section>
+{% endif %}
 
-  {% if logs %}
+{% if plot_groups %}
+{% for group in plot_groups %}
+  {% if group.plots %}
   <section>
-    <h2>Logs &amp; Notes</h2>
-    <ul class="file-list">
-      {% for log in logs %}
-      <li><a href="{{ savedir_relprefix }}/{{ log.path }}">{{ log.name }}</a></li>
+    <h2>{{ group.title }}</h2>
+    <ul class="file-list plots">
+      {% for plot in group.plots %}
+      <li>
+        <a href="{{ savedir_relprefix }}/{{ plot.path }}">{{ plot.name }}</a>
+        {% if plot.preview %}
+        <div class="preview"><a href="{{ savedir_relprefix }}/{{ plot.path }}"><img src="{{ preview_relprefix }}/{{ plot.preview }}" alt="Preview of {{ plot.name }}"></a></div>
+        {% endif %}
+      </li>
       {% endfor %}
     </ul>
   </section>
   {% endif %}
+{% endfor %}
+{% else %}
+<section>
+  <p class="meta">No plots available for this comparison.</p>
+</section>
+{% endif %}
 
-  <footer>
-    <p>Static report generated by tackle2.</p>
-  </footer>
-  </main>
-</body>
-</html>
+{% if logs %}
+<section>
+  <h2>Logs &amp; Notes</h2>
+  <ul class="file-list">
+    {% for log in logs %}
+    <li><a href="{{ savedir_relprefix }}/{{ log.path }}">{{ log.name }}</a></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<footer>
+  <p>Static report generated by tackle2.</p>
+</footer>
+{% endblock %}

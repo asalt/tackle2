@@ -7,7 +7,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -60,8 +60,8 @@ class TopPathway:
 class ComparisonSummary:
     identifier: str
     display_name: str
-    table_path: Path
-    relative_path: Path
+    table_path: Optional[Path]
+    relative_path: Optional[Path]
     total_pathways: int
     significant_pathways: int
     top_pathways: List[TopPathway] = field(default_factory=list)
@@ -345,10 +345,54 @@ def _summarise_table(
     )
 
 
+def _comparison_summary_from_record(record: Any) -> ComparisonSummary:
+    top_pathways = [
+        TopPathway(
+            pathway=str(pathway.pathway),
+            nes=pathway.nes,
+            padj=pathway.padj,
+            leading_genes=pathway.leading_genes,
+            peak_rank_pct=pathway.peak_rank_pct,
+            leading_edge_fraction=pathway.leading_edge_fraction,
+            leading_edge_span_pct=pathway.leading_edge_span_pct,
+            front_loaded_score=pathway.front_loaded_score,
+            leading_gene_items=tuple(pathway.leading_gene_items),
+        )
+        for pathway in getattr(record, "top_pathways", ())
+    ]
+
+    return ComparisonSummary(
+        identifier=str(getattr(record, "comparison_id")),
+        display_name=_format_display(str(getattr(record, "comparison_id"))),
+        table_path=getattr(record, "table_path", None),
+        relative_path=getattr(record, "relative_path", None),
+        total_pathways=int(getattr(record, "total_pathways", 0)),
+        significant_pathways=int(getattr(record, "significant_pathways", 0)),
+        top_pathways=top_pathways,
+    )
+
+
+def _append_comparison_summary(
+    *,
+    collections: Dict[str, CollectionSummary],
+    collection_token: str,
+    comparison_summary: ComparisonSummary,
+) -> None:
+    collection_summary = collections.setdefault(
+        collection_token,
+        CollectionSummary(
+            identifier=collection_token,
+            display_name=_format_display(collection_token),
+        ),
+    )
+    collection_summary.comparisons.append(comparison_summary)
+
+
 def build_context(
     savedir: Path,
     artefacts: SavedirArtefacts,
     config_path: Optional[Path] = None,
+    comparison_records: Optional[Sequence[Any]] = None,
 ) -> Dict:
     """Assemble a JSON-serialisable context for the report template."""
 
@@ -357,16 +401,32 @@ def build_context(
     collection_tokens = _known_collection_tokens(savedir, artefacts, config_path)
     table_entries = _reportable_table_entries(artefacts.gsea_tables, collection_tokens)
 
-    for table_path, collection_token, _comparison_token in table_entries:
-        comparison_summary = _summarise_table(table_path, artefacts.savedir, collection_tokens)
-        collection_summary = collections.setdefault(
-            collection_token,
-            CollectionSummary(
-                identifier=collection_token,
-                display_name=_format_display(collection_token),
-            ),
-        )
-        collection_summary.comparisons.append(comparison_summary)
+    if comparison_records is None:
+        for table_path, collection_token, _comparison_token in table_entries:
+            comparison_summary = _summarise_table(
+                table_path=table_path,
+                savedir=artefacts.savedir,
+                collection_tokens=collection_tokens,
+            )
+            _append_comparison_summary(
+                collections=collections,
+                collection_token=collection_token,
+                comparison_summary=comparison_summary,
+            )
+        record_count = len(table_entries)
+    else:
+        records = list(comparison_records)
+        for record in records:
+            comparison_summary = _comparison_summary_from_record(record)
+            collection_token = str(getattr(record, "collection_id", "")).strip()
+            if not collection_token and comparison_summary.table_path is not None:
+                collection_token, _ = _split_table_name(comparison_summary.table_path, collection_tokens)
+            _append_comparison_summary(
+                collections=collections,
+                collection_token=collection_token,
+                comparison_summary=comparison_summary,
+            )
+        record_count = len(records)
 
     for collection in collections.values():
         collection.comparisons.sort(key=lambda cs: cs.display_name.lower())
@@ -400,14 +460,14 @@ def build_context(
         "stats": {
             "collections": len(collections),
             "comparisons": total_comparisons,
-            "tables": len(table_entries),
+            "tables": record_count,
             "pathways": total_pathways,
             "significant_pathways": global_significant,
         },
         "collections": list(collections.values()),
         "plots": plots,
         "logs": logs,
-        "has_tables": len(table_entries) > 0,
+        "has_tables": record_count > 0,
         "config_path": _display_path(Path(config_path)) if config_path else None,
         "llm_summary": None,
     }

@@ -13,9 +13,11 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
 from .. import export_packager
 from . import catalog, summary
 from .llm import ReportSummarizer, SummaryRequest
+from .result_store import HybridResultStore
 from .summary import CollectionSummary, ComparisonSummary, GeneratedSummary
 
 logger = logging.getLogger(__name__)
+RESULT_STORE = HybridResultStore()
 
 SCHEMA_VERSION = 1
 
@@ -192,7 +194,17 @@ def generate_and_store_summaries(
         output=output,
     )
     artefacts = catalog.scan_savedir(resolved_savedir)
-    context = summary.build_context(resolved_savedir, artefacts, config_path=resolved_config)
+    comparison_records = RESULT_STORE.load_comparisons(
+        savedir=resolved_savedir,
+        artefacts=artefacts,
+        config_path=resolved_config,
+    )
+    context = summary.build_context(
+        resolved_savedir,
+        artefacts,
+        config_path=resolved_config,
+        comparison_records=comparison_records,
+    )
     collections = context.get("collections", [])
 
     summarizer.set_cache_dir(summary_dir / ".cache")
