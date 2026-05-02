@@ -25,6 +25,38 @@ log_msg <- util_tools$make_partial(util_tools$log_msg)
 
 # ==
 
+normalize_rank_names <- function(x) {
+  out <- fs::path_file(as.character(x))
+  is_missing <- is.na(out)
+
+  # Some cached rank files are created from volcano TSVs as <name>.tsv.rnk.
+  # Strip only known rank/table suffixes so dotted sample labels remain intact.
+  for (i in seq_len(3)) {
+    out <- sub("\\.(rnk|tsv|csv|txt)(\\.gz)?$", "", out, ignore.case = TRUE, perl = TRUE)
+  }
+  out[is_missing] <- NA_character_
+  out
+}
+
+dedupe_rank_names <- function(lst, context = "rank inputs") {
+  rank_names <- names(lst)
+  if (is.null(rank_names) || length(rank_names) == 0) {
+    return(lst)
+  }
+
+  duplicated_labels <- rank_names[duplicated(rank_names)]
+  if (length(duplicated_labels) > 0) {
+    log_msg(warning = paste0(
+      "duplicate rank names after extension normalization in ",
+      context,
+      "; keeping first occurrence for: ",
+      paste(unique(duplicated_labels), collapse = ", ")
+    ))
+    lst <- lst[!duplicated(rank_names)]
+  }
+  lst
+}
+
 make_random_gct <- function(nrow = 10, ncol = 4) {
   set.seed(369)
   nrow <- max(nrow, 1)
@@ -135,8 +167,7 @@ create_rnkfiles_from_volcano <- function(
   log_msg(msg = paste(volcanofiles, collapse = "\n"))
 
   lst <- volcanofiles %>%
-    purrr::set_names(nm = ~ basename(.) %>%
-        sub("\\.rnk$", "", .)) %>%  # fs::path_ext_remove()) %>% # set names first
+    purrr::set_names(nm = ~ normalize_rank_names(.)) %>%
     purrr::map(~ {
       .table <- read_tsv(.x, show_col_types = F)
       if (value_col %in% colnames(.table)) {
@@ -161,11 +192,11 @@ create_rnkfiles_from_volcano <- function(
     stringr::str_extract(., pattern = "(?<=group_)([^.*]*)$")
   log_msg(msg = paste0("shorter names are ", paste0(shorternames, "\n")))
   if (!all(is.na(shorternames)) && length(unique(shorternames)) == length(names(lst))) {
-    names(lst) <- shorternames
+    names(lst) <- normalize_rank_names(shorternames)
   } else {
     log_msg(msg = "nas in shorter names, not reassigning")
   }
-  lst
+  dedupe_rank_names(lst, context = "volcano files")
 }
 
 
@@ -179,6 +210,11 @@ write_rnkfiles <- function(
     log_msg(msg = paste0("creating ", dir))
     fs::dir_create(dir, recurse = TRUE)
   }
+  rank_names <- names(lst)
+  if (!is.null(rank_names) && length(rank_names) == length(lst)) {
+    names(lst) <- normalize_rank_names(rank_names)
+  }
+  lst <- dedupe_rank_names(lst, context = "rank files to write")
   lst %>% purrr::iwalk( # .x is the value, .y is the name
     ~ {
       .outname <- fs::path_join(
@@ -480,9 +516,8 @@ load_and_process_ranks <- function(params) {
     if (length(rnkfiles) > 0) {
       log_msg(msg = paste0("found ", length(rnkfiles), " rankfiles"))
       rnkdfs <- rnkfiles %>% load_rnkfiles()
-      names(rnkdfs) <- names(rnkdfs) %>%
-        fs::path_file() %>%
-        sub("\\.rnk$", "", .)
+      names(rnkdfs) <- normalize_rank_names(rnkfiles)
+      rnkdfs <- dedupe_rank_names(rnkdfs, context = "cached rank files")
 
         #fs::path_ext_remove() # this is no good
 
@@ -495,7 +530,7 @@ load_and_process_ranks <- function(params) {
           delim = '=',
            comment = '#',
            show_col_types = F
-        ) %>% mutate(old = sub("\\.rnk$", "", old))
+        ) %>% mutate(old = normalize_rank_names(old))
 
         # fs::path_ext_remove(old))
 
@@ -517,7 +552,7 @@ load_and_process_ranks <- function(params) {
           ))
         }
 
-        for (ix in seq_len(length(rnkdfs))) {
+        for (ix in seq_len(nrow(name_mapping))) {
           .new <- name_mapping[ix, ]$new
           .old <- name_mapping[ix, ]$old
           if (.old %in% names(rnkdfs)) {
@@ -593,8 +628,7 @@ load_and_process_ranks <- function(params) {
     rnkdfs <- create_rnkfiles_from_volcano(volcanodir, value_col = "signedlogP")
     rnkdfs %>% write_rnkfiles(dir = rankfiledir) # and save
     names(rnkdfs) <- names(rnkdfs) %>%
-      fs::path_file() %>%
-      fs::path_ext_remove()
+      normalize_rank_names()
     log_msg(paste0("length of retrieved rankfiles: ", length(rnkdfs)))
     ranks_list <- rnkdfs %>% ranks_dfs_to_lists()
     return(ranks_list)

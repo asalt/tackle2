@@ -64,6 +64,68 @@ test_that("create_rnkfiles_from_volcano processes files correctly", {
   })
 })
 
+test_that("rank names strip known rank source extensions only", {
+  expect_equal(
+    io_tools$normalize_rank_names(c(
+      "sample.v1.rnk",
+      "sample.v1.tsv.rnk",
+      "sample.v1.tsv",
+      "sample.v1"
+    )),
+    c("sample.v1", "sample.v1", "sample.v1", "sample.v1")
+  )
+})
+
+test_that("volcano rank names and cached rank filenames do not keep .tsv", {
+  withr::with_tempdir({
+    fs::dir_create("volcano_test")
+    write_lines(
+      "GeneID\tsignedlogP\nGene1\t0.5\nGene2\t-1.2",
+      "volcano_test/MSPC001608_20260428_nz1_dir_B_fna_T_group_genoKO_minus_genoWT_imv_T_med.tsv"
+    )
+
+    result <- io_tools$create_rnkfiles_from_volcano(
+      "volcano_test",
+      id_col = "GeneID",
+      value_col = "signedlogP"
+    )
+    expect_equal(names(result), "genoKO_minus_genoWT_imv_T_med")
+    expect_false(any(stringr::str_detect(names(result), "\\.tsv$")))
+
+    io_tools$write_rnkfiles(result, "ranks")
+    expect_true(fs::file_exists(file.path("ranks", "genoKO_minus_genoWT_imv_T_med.rnk")))
+    expect_false(fs::file_exists(file.path("ranks", "genoKO_minus_genoWT_imv_T_med.tsv.rnk")))
+  })
+})
+
+test_that("cached legacy .tsv.rnk rank files load with normalized names", {
+  withr::with_tempdir({
+    fs::dir_create("ranks")
+    write_lines(
+      "Gene1\t0.5\nGene2\t-1.2",
+      "ranks/MSPC001608_20260428_nz1_dir_B_fna_T_group_genoKO_minus_genoWT_imv_T_med.tsv.rnk"
+    )
+
+    params <- list(
+      rankfiledir = "ranks",
+      volcanodir = NULL,
+      gct_path = NULL,
+      ranks_from = "volcano",
+      sample_exclude = NULL,
+      zscore_emat = FALSE,
+      zscore_emat_groupby = FALSE,
+      advanced = list(exclude_samples_from_data = FALSE)
+    )
+
+    ranks <- io_tools$load_and_process_ranks(params)
+    expect_equal(
+      names(ranks),
+      "MSPC001608_20260428_nz1_dir_B_fna_T_group_genoKO_minus_genoWT_imv_T_med"
+    )
+    expect_false(any(stringr::str_detect(names(ranks), "\\.tsv$")))
+  })
+})
+
 test_that("create_rnkfiles_from_volcano processes files rename", {
   withr::with_tempdir({
     # Create a temporary directory and some sample files
