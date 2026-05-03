@@ -141,6 +141,183 @@ test_that("test run one collapse", {
   )
 })
 
+test_that("signed Hallmark scenarios recover their intended dominant programs", {
+  catalog <- sim_tools$get_hallmark_scenario_catalog()
+  sim <- sim_tools$simulate_signed_hallmark_scenarios(
+    seed = 5150,
+    n_replicates = 1
+  )
+
+  geneset <- geneset_tools$get_collection("H", "")
+  geneset_list <- geneset_tools$genesets_df_to_list(geneset)
+  rankobjs <- io_tools$ranks_dfs_to_lists(sim$rank_dfs)
+
+  expected_negative <- list(
+    oxphos_metabolic = "HALLMARK_GLYCOLYSIS",
+    interferon_inflammatory = "HALLMARK_OXIDATIVE_PHOSPHORYLATION",
+    emt_hypoxia = "HALLMARK_OXIDATIVE_PHOSPHORYLATION"
+  )
+
+  for (scenario_id in names(catalog)) {
+    rank_name <- sprintf("%s_rep01", scenario_id)
+    scenario_res <- suppressWarnings(
+      fgsea_tools$run_one(rankobjs[[rank_name]], geneset_list, collapse = FALSE)
+    ) %>%
+      dplyr::filter(!is.na(NES))
+
+    top_positive <- scenario_res %>%
+      dplyr::filter(NES > 0) %>%
+      dplyr::arrange(dplyr::desc(NES)) %>%
+      utils::head(5) %>%
+      dplyr::pull(pathway)
+
+    expect_true(
+      any(top_positive %in% catalog[[scenario_id]]$focus_pathways),
+      info = paste("Expected a focus pathway among the top positive NES results for", scenario_id)
+    )
+
+    if (scenario_id %in% names(expected_negative)) {
+      top_negative <- scenario_res %>%
+        dplyr::filter(NES < 0) %>%
+        dplyr::arrange(NES) %>%
+        utils::head(5) %>%
+        dplyr::pull(pathway)
+
+      expect_true(
+        expected_negative[[scenario_id]] %in% top_negative,
+        info = paste("Expected a contrast pathway among the top negative NES results for", scenario_id)
+      )
+    }
+  }
+})
+
+test_that("signed Hallmark expression simulator preserves Hallmark themes after limma back-calculation", {
+  catalog <- sim_tools$get_hallmark_scenario_catalog()
+  sim <- sim_tools$simulate_signed_hallmark_expression(
+    seed = 5150,
+    target_source = "signal_mean",
+    n_samples_per_group = 5
+  )
+
+  geneset <- geneset_tools$get_collection("H", "")
+  geneset_list <- geneset_tools$genesets_df_to_list(geneset)
+  rankobjs <- io_tools$ranks_dfs_to_lists(sim$recovered_rank_dfs)
+
+  expected_negative <- list(
+    oxphos_metabolic = "HALLMARK_GLYCOLYSIS",
+    interferon_inflammatory = "HALLMARK_OXIDATIVE_PHOSPHORYLATION",
+    emt_hypoxia = "HALLMARK_OXIDATIVE_PHOSPHORYLATION"
+  )
+
+  for (scenario_id in names(catalog)) {
+    scenario_res <- suppressWarnings(
+      fgsea_tools$run_one(rankobjs[[scenario_id]], geneset_list, collapse = FALSE)
+    ) %>%
+      dplyr::filter(!is.na(NES))
+
+    top_positive <- scenario_res %>%
+      dplyr::filter(NES > 0) %>%
+      dplyr::arrange(dplyr::desc(NES)) %>%
+      utils::head(10) %>%
+      dplyr::pull(pathway)
+
+    expect_true(
+      any(top_positive %in% catalog[[scenario_id]]$focus_pathways),
+      info = paste("Expected a focus pathway among the recovered positive NES results for", scenario_id)
+    )
+
+    if (scenario_id %in% names(expected_negative)) {
+      top_negative <- scenario_res %>%
+        dplyr::filter(NES < 0) %>%
+        dplyr::arrange(NES) %>%
+        utils::head(10) %>%
+        dplyr::pull(pathway)
+
+      expect_true(
+        expected_negative[[scenario_id]] %in% top_negative,
+        info = paste("Expected a contrast pathway among the recovered negative NES results for", scenario_id)
+      )
+    }
+  }
+})
+
+test_that("teaching Hallmark datasets preserve their intended treatment programs after limma and GSEA", {
+  testthat::skip_if_not_installed("limma")
+
+  catalog <- sim_tools$get_hallmark_teaching_dataset_catalog()
+  sim <- sim_tools$simulate_hallmark_teaching_datasets(
+    seed = 6404,
+    n_samples_per_group_batch = 3
+  )
+
+  geneset <- geneset_tools$get_collection("H", "")
+  geneset_list <- geneset_tools$genesets_df_to_list(geneset)
+
+  for (dataset_id in names(sim$datasets)) {
+    ds <- sim$datasets[[dataset_id]]
+    meta <- ds$sample_metadata
+    meta$group <- factor(meta$group, levels = c("A", "B", "C", "D"))
+    meta$batch <- factor(meta$batch, levels = unique(meta$batch))
+
+    design <- stats::model.matrix(~ 0 + group + batch, data = meta)
+    fit <- limma::lmFit(ds$expression_matrix, design)
+    contrast_matrix <- limma::makeContrasts(
+      D_vs_B = groupD - groupB,
+      levels = design
+    )
+    fit <- limma::contrasts.fit(fit, contrast_matrix)
+    fit <- limma::eBayes(fit, trend = TRUE, robust = TRUE)
+
+    top_table <- limma::topTable(
+      fit,
+      coef = "D_vs_B",
+      number = Inf,
+      sort.by = "none"
+    )
+    top_table$GeneID <- rownames(top_table)
+    rank_df <- top_table %>%
+      dplyr::transmute(
+        id = GeneID,
+        value = sign(logFC) * -log10(pmax(P.Value, .Machine$double.eps))
+      )
+    ranks <- stats::setNames(rank_df$value, rank_df$id)
+
+    scenario_res <- suppressWarnings(
+      fgsea_tools$run_one(ranks, geneset_list, collapse = FALSE)
+    ) %>%
+      dplyr::filter(!is.na(NES))
+
+    expected_up <- catalog[[dataset_id]]$expected_up_pathways
+    expected_down <- catalog[[dataset_id]]$expected_down_pathways
+
+    if (length(expected_up) > 0) {
+      top_positive <- scenario_res %>%
+        dplyr::filter(NES > 0) %>%
+        dplyr::arrange(dplyr::desc(NES)) %>%
+        utils::head(10) %>%
+        dplyr::pull(pathway)
+
+      expect_true(
+        any(top_positive %in% expected_up),
+        info = paste("Expected an intended up pathway among recovered positive NES results for", dataset_id)
+      )
+    }
+
+    if (length(expected_down) > 0) {
+      top_negative <- scenario_res %>%
+        dplyr::filter(NES < 0) %>%
+        dplyr::arrange(NES) %>%
+        utils::head(10) %>%
+        dplyr::pull(pathway)
+
+      expect_true(
+        any(top_negative %in% expected_down),
+        info = paste("Expected an intended down pathway among recovered negative NES results for", dataset_id)
+      )
+    }
+  }
+})
+
 test_that("filter_on_mainpathway retains all comparison rows for globally retained pathways", {
   df <- tibble::tibble(
     pathway = c("p1", "p1", "p2", "p2"),
