@@ -187,6 +187,7 @@ def test_generate_report_end_to_end(tmp_path):
     assert "tackle2 Summary" in html
     assert "HALLMARK" in html
     assert "Pages" in html
+    assert 'href="static/report.css"' in html
 
     collection_dir = index_path.parent / "collections"
     assert collection_dir.exists()
@@ -216,6 +217,7 @@ def test_cli_report_command(tmp_path):
     assert "Report written to" in result.output
     index_path = tmp_path / "web" / "index.html"
     assert index_path.exists()
+    assert 'href="static/report.css"' in index_path.read_text(encoding="utf-8")
     collection_dir = index_path.parent / "collections"
     assert any(collection_dir.glob("*.html"))
     assert any(collection_dir.glob("*/*.html"))

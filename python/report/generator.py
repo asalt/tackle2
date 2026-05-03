@@ -473,6 +473,7 @@ def generate_report(
     context["collection_pages"] = collection_pages
     context["savedir_relprefix"] = "."
     context["preview_relprefix"] = ""
+    context["static_href"] = "static/report.css"
     ai_context = _build_ai_page_context(
         context,
         context.get("collections", []),
