@@ -33,3 +33,8 @@ Rplots.pdf
 
 
 R/savedir/
+R/savedir
+.codex*
+run_cache/
+run_files/
+R/tests/integration_tests/test_output/
