@@ -42,6 +42,22 @@ test_that("test formatting for barplot", {
   )
 })
 
+test_that("enrichplot combined and individual directories share the same pathway slug", {
+  combined_dir <- plot_tools$make_enrichplot_dirname(
+    "enrichplots",
+    "KEGG_MEDICUS_PATHOGEN_HTLV_1_TAX_TO_SPINDLE_ASSEMBLY",
+    fallback = "combined_dir"
+  )
+  individual_dir <- plot_tools$make_enrichplot_dirname(
+    "enrichplots",
+    "KEGG_MEDICUS_PATHOGEN_HTLV_1_TAX_TO_SPINDLE_ASSEMBLY",
+    fallback = "enrich"
+  )
+
+  testthat::expect_equal(combined_dir, individual_dir)
+  testthat::expect_match(combined_dir, "^enrichplots_PATHOGEN_HTLV_1_TAX_TO_SPINDLE_ASSEMBLY")
+})
+
 
 test_that("test plot a single barplot", {
   plt <- TEST_DATA$H_[[1]] %>%
