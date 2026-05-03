@@ -106,7 +106,7 @@ collapse = false
 
 [[params.genesets]]
 category = "C2"
-subcategory = "CP:KEGG"
+subcategory = "CP:KEGG_MEDICUS"
 collapse = true
 
 [[params.genesets]]
