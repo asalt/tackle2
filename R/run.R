@@ -114,7 +114,10 @@ run <- function(params) {
   # log_msg(paste0("ranks from: ", params$ranks_from))
 
   # ==
-  ranks_list <- io_tools$load_and_process_ranks(params)
+  rank_inputs <- io_tools$load_and_process_rank_inputs(params)
+  ranks_list <- rank_inputs$ranks
+  rank_metadata <- rank_inputs$rank_metadata
+  rankname_order <- rank_metadata$rankname
   # =======
 
   db_cfg <- params$db %||% list()
@@ -397,7 +400,8 @@ run <- function(params) {
         io_tools$save_individual_gsea_results(
           savedir = file.path(savedir, "gsea_tables"),
           replace = params$advanced$replace,
-          species = species
+          species = species,
+          rank_metadata = rank_metadata
         )
 
       # maybe save pivoted file. gets extremely big extremely quickly
@@ -415,7 +419,7 @@ run <- function(params) {
       # TODO better and earlier handle metadata loading
       if (exists("gct") && !is.null(gct) && (params$ranks_from == "gct")) {
         metadata <- gct@cdesc
-        possible_group_order <- params$extra$rankname_order %||% NULL
+        possible_group_order <- rankname_order %||% NULL
         if ((!is.null(possible_group_order)) && ("group" %in% colnames(metadata)) && all(possible_group_order %in% metadata$group)) {
           metadata <- metadata %>%
             mutate(group = factor(group, levels = possible_group_order, ordered = T)) %>%
@@ -429,6 +433,8 @@ run <- function(params) {
       results_list_for_plots <- util_tools$filter_results_by_rankname(results_list, sample_exclude)
       all_gsea_results_for_plots <- util_tools$filter_gsea_results(all_gsea_results, sample_exclude)
       ranks_list_for_plots <- util_tools$filter_named_list(ranks_list, sample_exclude)
+      rank_metadata_for_plots <- rank_metadata[rank_metadata$rankname %in% names(ranks_list_for_plots), , drop = FALSE]
+      rankname_order_for_plots <- rank_metadata_for_plots$rankname
 
       if (length(sample_exclude) > 0) {
         log_msg(info = paste0(
@@ -457,7 +463,7 @@ run <- function(params) {
           shape = params$pca$mark_by %||% params$mark_by %||% NULL,
           fig_width = params$pca$width %||% 8.4,
           fig_height = params$pca$height %||% 7.6,
-          rankname_order = params$extra$rankname_order,
+          rankname_order = rankname_order_for_plots,
           # group_order = params$extra$facet_order %||% NULL
         )
 
@@ -477,7 +483,7 @@ run <- function(params) {
             gsea_object = .x,
             pca_object = pca_object,
             save_func = .save_func,
-            rankname_order = params$extra$rankname_order,
+            rankname_order = rankname_order_for_plots,
             cluster_rows = params$pca$cluster_rows %||% TRUE,
             cluster_columns = params$pca$cluster_columns %||% c(FALSE, TRUE),
             cut_by = params$pca$cut_by %||% params$heatmap_gene$cut_by %||% params$cut_by %||% NULL,
@@ -499,7 +505,8 @@ run <- function(params) {
         plts <- results_list_for_plots %>% plot_tools$all_barplots_with_numbers(
           # sample_order = params$rankname_order %||% params$sample_order, # no t necessary to pass this here
           limit = params$barplot$limit %||% c(10, 20, 30, 50),
-          save_func = save_func
+          save_func = save_func,
+          rank_metadata = rank_metadata_for_plots
         )
       }
 
@@ -511,7 +518,8 @@ run <- function(params) {
               results_list_for_plots,
               facet_order = NULL, # this isn't working properly
               save_func = save_func,
-              limit = params$barplot$limit %||% c(10, 20, 30, 50)
+              limit = params$barplot$limit %||% c(10, 20, 30, 50),
+              rank_metadata = rank_metadata_for_plots
             )
           },
           error = function(e) {
@@ -536,7 +544,8 @@ run <- function(params) {
           results_list_for_plots,
           limit = params$bubbleplot$limit,
           save_func = save_func,
-          glyph = params$bubbleplot$glyph
+          glyph = params$bubbleplot$glyph,
+          rank_metadata = rank_metadata_for_plots
         )
       }
 
@@ -554,7 +563,8 @@ run <- function(params) {
               results_list_for_plots,
               save_func = save_func,
               limit = params$bubbleplot$limit,
-              glyph = params$bubbleplot$glyph
+              glyph = params$bubbleplot$glyph,
+              rank_metadata = rank_metadata_for_plots
             )
           },
           error = function(e) {
@@ -650,7 +660,7 @@ run <- function(params) {
           cluster_rows = params$heatmap_gsea$cluster_rows %||% TRUE,
           cluster_columns = params$heatmap_gsea$cluster_columns %||% c(FALSE, TRUE),
           # sample_order = params$extra$rankname_order, # get rid of this one, pretty sure
-          rankname_order = params$extra$rankname_order,
+          rankname_order = rankname_order_for_plots,
           meta_to_include = params$heatmap_gsea$legend_include %||% params$legend_include,
           meta_to_exclude = params$pca$heatmap_gsea$legend_exclude %||% params$legend_exclude
         )
@@ -680,9 +690,9 @@ run <- function(params) {
             } else {
               combine_by_df <- data.frame(id=rownames(metadata_for_plots), facet=splits)
               rownames(combine_by_df) <- combine_by_df$id
-              if (!is.null(params$extra$rankname_order)) { # this will fail if not match exactly
+              if (!is.null(rankname_order_for_plots)) {
                 combine_by_df <- combine_by_df %>%
-                  mutate(facet = factor(facet, levels = params$extra$rankname_order, ordered = T)) %>%
+                  mutate(facet = factor(facet, levels = rankname_order_for_plots, ordered = T)) %>%
                   arrange(facet)
               }
           }
@@ -715,7 +725,8 @@ run <- function(params) {
           pathways_of_interest = pathways_of_interest,
           meta_to_include = params$heatmap_gene$legend_include %||% params$legend_include %||% NULL,
           meta_to_exclude = params$heatmap_gene$legend_exclude %||% params$legend_exclude %||% NULL,
-          parallel = params$heatmap_gene$parallel %||% FALSE   #params$advanced$parallel %||% FALSE, # setting this to true is unstable
+          parallel = params$heatmap_gene$parallel %||% FALSE,   #params$advanced$parallel %||% FALSE, # setting this to true is unstable
+          rank_metadata = rank_metadata_for_plots
 
         )
       }
@@ -748,9 +759,9 @@ run <- function(params) {
               rownames(combine_by_df) <- combine_by_df$id
               combine_by_df$rankname <- combine_by_df$id
             }
-            if ((!is.null(params$extra$rankname_order)) && (!is.null(combine_by_df))) {
+            if ((!is.null(rankname_order_for_plots)) && (!is.null(combine_by_df))) {
               combine_by_df <- combine_by_df %>%
-                mutate(facet = factor(facet, levels = params$extra$rankname_order, ordered = T)) %>%
+                mutate(facet = factor(facet, levels = rankname_order_for_plots, ordered = T)) %>%
                 arrange(facet)
             }
 
@@ -769,7 +780,8 @@ run <- function(params) {
               height = params$enplot$height %||% 4.0,
               pathways_of_interest = pathways_of_interest,
               combined_show_ticks = params$enplot$combined_show_ticks %||% FALSE,
-              combined_label_size = params$enplot$combined_label_size %||% 1.85
+              combined_label_size = params$enplot$combined_label_size %||% 1.85,
+              rank_metadata = rank_metadata_for_plots
             )
 
 
@@ -797,6 +809,7 @@ run <- function(params) {
           width = params$enplot$width %||% 5.4,
           height = params$enplot$height %||% 4.0,
           pathways_of_interest = pathways_of_interest,
+          rank_metadata = rank_metadata_for_plots
           # combined_show_ticks = params$enplot$combined_show_ticks %||% FALSE,
           # combined_label_size = params$enplot$combined_label_size %||% 2.05
         )

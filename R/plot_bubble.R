@@ -72,6 +72,7 @@ bubble_plot <- function(
     nes_range = NULL,
     size_range = c(3.0, 9.0),
     glyph = DEFAULT_BUBBLE_GLYPH,
+    rank_metadata = NULL,
     ...) {
 
   sel <- prepare_data_for_bubble(df, glyph = glyph)
@@ -82,41 +83,42 @@ bubble_plot <- function(
     return(NULL)
   }
 
-  formatted_title <- title %>%
-    str_replace_all("_", " ") %>%
-    str_wrap(width = 54)
+  formatted_title <- plot_tools$format_display_label(title, wrap_width = 54)
 
   formatted_subtitle <- if (is.null(subtitle)) {
     NULL
   } else {
-    subtitle %>% str_replace_all("_", " ") %>% str_wrap(width = 72)
+    plot_tools$format_display_label(subtitle, wrap_width = 72)
   }
 
   custom_labeller <- function(value) {
-    vapply(value, function(label) {
-      label %>%
-        str_replace_all("_", " ") %>%
-        str_wrap(width = 54)
-    }, character(1))
+    plot_tools$format_display_label(value, wrap_width = 54)
   }
+
+  if ("rankname" %in% names(sel)) {
+    # right here we make a mapping and rename for display
+    # for facetted plots
+    rankname_values <- unique(as.character(sel$rankname))
+    name_map <- plot_tools$make_rank_display_name_map(rankname_values, rank_metadata)
+    sel <- sel %>% dplyr::mutate(
+                          rankname=dplyr::recode(
+                                               as.character(rankname),
+                                               !!!name_map  # named vector
+                                               )
+                          )
+    label_order <- if (plot_tools$has_explicit_rank_labels(rank_metadata, rankname_values)) {
+      plot_tools$rank_label_order(rank_metadata, rankname_values)
+    } else {
+      NULL
+    }
+    facet_order <- if (!is.null(label_order)) label_order else facet_order
+    }
 
   if (!is.null(facet_order) && "rankname" %in% colnames(sel)) {
     sel <- sel %>%
       mutate(rankname = factor(rankname, levels = facet_order, ordered = TRUE)) %>%
       arrange(rankname)
   }
-
-  if ("rankname" %in% names(sel)) {
-    # right here we make a mapping and rename for display
-    # for facetted plots
-    name_map <- util_tools$make_name_map(unique(sel$rankname))
-    sel <- sel %>% dplyr::mutate(
-                          rankname=dplyr::recode(
-                                               rankname,
-                                               !!!name_map  # named vector
-                                               )
-                          )
-    }
 
 
 
@@ -140,10 +142,8 @@ bubble_plot <- function(
     TRUE ~ 5.2
   )
   strip_label_chars <- if ("rankname" %in% names(sel)) {
-    sel$rankname %>% as.character() %>%
-      stringr::str_replace_all("\n", " ") %>%
-      stringr::str_replace_all("_", " ") %>%
-      stringr::str_squish()
+    plot_tools$format_display_label(sel$rankname) %>%
+      stringr::str_replace_all("\n", " ")
   } else {
     character(0)
   }
@@ -157,7 +157,7 @@ bubble_plot <- function(
 
   p <- ggplot(sel, aes(x = NES, y = pathway)) +
     # Reference line at x=0, layered behind points
-    geom_vline(xintercept = 0, colour = scales::alpha("#555555", 0.6), size = 0.4, show.legend = FALSE) +
+    geom_vline(xintercept = 0, colour = scales::alpha("#555555", 0.6), linewidth = 0.4, show.legend = FALSE) +
     geom_point(
       aes(
         size = plot_leading_edge,
@@ -215,8 +215,15 @@ bubble_plot <- function(
       axis.text.x = element_text(size = 7.0),
       plot.title = element_text(size = 10, face = "bold", hjust = 0),
       plot.subtitle = element_text(hjust = 0),
-      strip.text = element_text(size = strip_text_size, face = "bold", hjust = 0.5),
-      legend.position = "right"
+      strip.text = element_text(
+        size = strip_text_size,
+        face = "bold",
+        hjust = 0.5,
+        margin = margin(t = 2.5, r = 6, b = 2.5, l = 6)
+      ),
+      strip.clip = "off",
+      legend.position = "right",
+      plot.margin = margin(t = 6, r = 10, b = 6, l = 6)
     )
 
   if (nrow(sel_text_dark) > 0) {
@@ -320,6 +327,7 @@ all_bubble_plots <- function(
     limit = 20,
     size_range = c(3.0, 9.0),
     glyph = DEFAULT_BUBBLE_GLYPH,
+    rank_metadata = NULL,
     ...) {
   if (!is.null(save_func)) {
     existing_filename <- get_arg(save_func, "filename")
@@ -336,7 +344,7 @@ all_bubble_plots <- function(
       list_of_comparisons <- .x
       # Build a friendly mapping to strip shared affixes from comparison names
       comparison_names <- names(list_of_comparisons)
-      name_map <- util_tools$make_name_map(comparison_names)
+      name_map <- plot_tools$make_rank_display_name_map(comparison_names, rank_metadata)
       list_of_comparisons %>% purrr::imap(
         ~ {
           dataframe <- .x
@@ -400,6 +408,7 @@ all_bubble_plots <- function(
               nes_range = nes_range,
               size_range = size_range,
               glyph = glyph,
+              rank_metadata = rank_metadata,
               ...
             )
           })
@@ -416,6 +425,7 @@ do_combined_bubble_plots <- function(
     limit = 20,
     size_range = c(3.0, 9.0),
     glyph = DEFAULT_BUBBLE_GLYPH,
+    rank_metadata = NULL,
     ...) {
   genesets <- names(results_list)
 
@@ -470,6 +480,7 @@ do_combined_bubble_plots <- function(
         nes_range = nes_range,
         size_range = size_range,
         glyph = glyph,
+        rank_metadata = rank_metadata,
         ...
       )
     })

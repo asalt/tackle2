@@ -150,7 +150,7 @@ Generated limma summaries and volcano PDFs are stored under `savedir/model/<type
 
 ### Rank file helpers
 
-- `rankfiledir/names.txt` (optional): Plain text mapping file used when reading existing `.rnk` files. Each line should take the form `NewLabel=old_file_name.rnk`. Mappings are applied in file order, so you can both rename and reorder comparisons without regenerating ranks. Lines starting with `#` are ignored.
+- `rankfiledir/names.txt` (optional): Plain text label/order file used when reading existing `.rnk` files. Each line should take the form `Display Label=canonical_file_name.rnk`. The right side resolves to the canonical `rankname`; the left side is used only as a downstream display label. Mappings are applied in file order for display ordering. Duplicate display labels are repaired with numeric suffixes and a warning. Lines starting with `#` are ignored.
 
 ## params.genesets (array of tables)
 

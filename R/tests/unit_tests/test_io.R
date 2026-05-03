@@ -89,12 +89,12 @@ test_that("volcano rank names and cached rank filenames do not keep .tsv", {
       id_col = "GeneID",
       value_col = "signedlogP"
     )
-    expect_equal(names(result), "genoKO_minus_genoWT_imv_T_med")
+    expect_equal(names(result), "MSPC001608_20260428_nz1_dir_B_fna_T_group_genoKO_minus_genoWT_imv_T_med")
     expect_false(any(stringr::str_detect(names(result), "\\.tsv$")))
 
     io_tools$write_rnkfiles(result, "ranks")
-    expect_true(fs::file_exists(file.path("ranks", "genoKO_minus_genoWT_imv_T_med.rnk")))
-    expect_false(fs::file_exists(file.path("ranks", "genoKO_minus_genoWT_imv_T_med.tsv.rnk")))
+    expect_true(fs::file_exists(file.path("ranks", "MSPC001608_20260428_nz1_dir_B_fna_T_group_genoKO_minus_genoWT_imv_T_med.rnk")))
+    expect_false(fs::file_exists(file.path("ranks", "MSPC001608_20260428_nz1_dir_B_fna_T_group_genoKO_minus_genoWT_imv_T_med.tsv.rnk")))
   })
 })
 
@@ -123,6 +123,95 @@ test_that("cached legacy .tsv.rnk rank files load with normalized names", {
       "MSPC001608_20260428_nz1_dir_B_fna_T_group_genoKO_minus_genoWT_imv_T_med"
     )
     expect_false(any(stringr::str_detect(names(ranks), "\\.tsv$")))
+  })
+})
+
+test_that("names.txt creates label and order metadata without renaming ranks", {
+  withr::with_tempdir({
+    fs::dir_create("ranks")
+    write_lines("Gene1\t0.5\nGene2\t-1.2", "ranks/rank_a.rnk")
+    write_lines("Gene1\t1.5\nGene2\t-0.3", "ranks/rank_b.rnk")
+    write_lines("Gene1\t2.5\nGene2\t-2.3", "ranks/rank_c.rnk")
+    write_lines(c(
+      "Pretty=rank_b.rnk",
+      "Pretty=rank_a.rnk"
+    ), "ranks/names.txt")
+
+    params <- list(
+      rankfiledir = "ranks",
+      volcanodir = NULL,
+      gct_path = NULL,
+      ranks_from = "volcano",
+      sample_exclude = NULL,
+      zscore_emat = FALSE,
+      zscore_emat_groupby = FALSE,
+      extra = list(rankname_order = NULL),
+      advanced = list(exclude_samples_from_data = FALSE)
+    )
+
+    rank_inputs <- io_tools$load_and_process_rank_inputs(params)
+
+    expect_equal(names(rank_inputs$ranks), c("rank_b", "rank_a", "rank_c"))
+    expect_equal(
+      rank_inputs$rank_metadata$rankname,
+      c("rank_b", "rank_a", "rank_c")
+    )
+    expect_equal(
+      rank_inputs$rank_metadata$rank_label,
+      c("Pretty", "Pretty.2", "rank_c")
+    )
+    expect_equal(rank_inputs$rank_metadata$rank_order, c(1L, 2L, 3L))
+    expect_true(is.ordered(rank_inputs$rank_metadata$rankname_factor))
+    expect_true(is.ordered(rank_inputs$rank_metadata$rank_label_factor))
+  })
+})
+
+test_that("duplicate rank label repair validates labels and supports custom separators", {
+  expect_equal(
+    io_tools$repair_duplicate_rank_labels(c("Pretty", "Pretty")),
+    c("Pretty", "Pretty.2")
+  )
+  expect_equal(
+    io_tools$repair_duplicate_rank_labels(c("Pretty", "Pretty"), sep = "_"),
+    c("Pretty", "Pretty_2")
+  )
+  expect_error(
+    io_tools$repair_duplicate_rank_labels(c("Pretty", "")),
+    "labels must be non-missing, non-empty strings"
+  )
+  expect_error(
+    io_tools$repair_duplicate_rank_labels(c("Pretty", NA)),
+    "labels must be non-missing, non-empty strings"
+  )
+})
+
+test_that("rankname_order remains canonical and overrides names.txt ordering", {
+  withr::with_tempdir({
+    fs::dir_create("ranks")
+    write_lines("Gene1\t0.5\nGene2\t-1.2", "ranks/rank_a.rnk")
+    write_lines("Gene1\t1.5\nGene2\t-0.3", "ranks/rank_b.rnk")
+    write_lines(c(
+      "Pretty B=rank_b.rnk",
+      "Pretty A=rank_a.rnk"
+    ), "ranks/names.txt")
+
+    params <- list(
+      rankfiledir = "ranks",
+      volcanodir = NULL,
+      gct_path = NULL,
+      ranks_from = "volcano",
+      sample_exclude = NULL,
+      zscore_emat = FALSE,
+      zscore_emat_groupby = FALSE,
+      extra = list(rankname_order = c("rank_a", "rank_b")),
+      advanced = list(exclude_samples_from_data = FALSE)
+    )
+
+    rank_inputs <- io_tools$load_and_process_rank_inputs(params)
+
+    expect_equal(names(rank_inputs$ranks), c("rank_a", "rank_b"))
+    expect_equal(rank_inputs$rank_metadata$rank_label, c("Pretty A", "Pretty B"))
+    expect_equal(rank_inputs$rank_metadata$rank_order, c(1L, 2L))
   })
 })
 

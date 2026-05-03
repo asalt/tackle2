@@ -57,6 +57,242 @@ dedupe_rank_names <- function(lst, context = "rank inputs") {
   lst
 }
 
+repair_duplicate_rank_labels <- function(labels, sep = ".") {
+  labels <- as.character(labels)
+  for (label in labels) {
+    if (is.na(label) || !nzchar(label)) {
+      stop("labels must be non-missing, non-empty strings")
+    }
+  }
+
+  duplicated_labels <- labels[duplicated(labels)]
+  if (length(duplicated_labels) == 0) {
+    return(labels)
+  }
+
+  log_msg(warning = paste0(
+    "duplicate rank labels detected: ",
+    paste(unique(duplicated_labels), collapse = ", "),
+    ". Repairing display labels with numeric suffixes."
+  ))
+
+  repaired <- character(length(labels))
+  counts <- integer(0)
+  used <- character(0)
+  for (ix in seq_along(labels)) {
+    label <- labels[[ix]]
+    # Check for label membership in counts before indexing the named integer vector.
+    current_count <- if (label %in% names(counts)) counts[[label]] else 0L
+    counts[[label]] <- current_count + 1L
+    candidate <- if (counts[[label]] == 1L) label else paste0(label, sep, counts[[label]]) # guaranteed to be in counts
+    while (candidate %in% used) {
+      counts[[label]] <- counts[[label]] + 1L
+      candidate <- paste0(label, sep, counts[[label]])
+    }
+    repaired[[ix]] <- candidate
+    used <- c(used, candidate)
+  }
+  repaired
+}
+
+read_rank_label_mapping <- function(rankfiledir) {
+  if (is.null(rankfiledir)) {
+    return(NULL)
+  }
+
+  name_mapping_file <- file.path(rankfiledir, "names.txt")
+  if (!fs::file_exists(name_mapping_file)) {
+    return(NULL)
+  }
+
+  log_msg(msg = paste0("found rank label mapping file: ", name_mapping_file))
+  mapping <- read_delim(
+    name_mapping_file,
+    col_names = c("rank_label", "rank_source"),
+    delim = "=",
+    comment = "#",
+    trim_ws = TRUE,
+    show_col_types = FALSE
+  )
+  if (!all(c("rank_label", "rank_source") %in% colnames(mapping))) {
+    stop("names.txt must contain lines of the form Rank Label=rank_file.rnk")
+  }
+
+  mapping <- mapping %>%
+    dplyr::mutate(
+      rank_label = trimws(as.character(.data$rank_label)),
+      rankname = normalize_rank_names(.data$rank_source)
+    ) %>%
+    dplyr::filter(!is.na(.data$rankname), nzchar(.data$rankname))
+
+  if (nrow(mapping) == 0) {
+    return(NULL)
+  }
+
+  empty_labels <- !nzchar(mapping$rank_label) | is.na(mapping$rank_label)
+  if (any(empty_labels)) {
+    log_msg(warning = "names.txt contains empty labels; using canonical rank names for those entries")
+    mapping$rank_label[empty_labels] <- mapping$rankname[empty_labels]
+  }
+
+  duplicated_ranknames <- mapping$rankname[duplicated(mapping$rankname)]
+  if (length(duplicated_ranknames) > 0) {
+    log_msg(warning = paste0(
+      "names.txt references the same rank more than once: ",
+      paste(unique(duplicated_ranknames), collapse = ", "),
+      ". Keeping the first mapping for each rank."
+    ))
+    mapping <- mapping[!duplicated(mapping$rankname), , drop = FALSE]
+  }
+
+  mapping
+}
+
+make_rank_metadata <- function(
+    rank_names,
+    rankfiledir = NULL,
+    rankname_order = NULL) {
+  rank_names <- normalize_rank_names(rank_names)
+  rank_names <- rank_names[!is.na(rank_names) & nzchar(rank_names)]
+  rank_names <- rank_names[!duplicated(rank_names)]
+
+  if (length(rank_names) == 0) {
+    return(data.frame(
+      rankname = character(),
+      rank_label = character(),
+      rank_order = integer(),
+      rank_label_source = character(),
+      rankname_factor = ordered(character()),
+      rank_label_factor = ordered(character()),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  mapping <- read_rank_label_mapping(rankfiledir)
+  mapped_order <- character(0)
+  label_by_rank <- stats::setNames(rank_names, rank_names)
+  label_source_by_rank <- stats::setNames(rep("default", length(rank_names)), rank_names)
+
+  if (!is.null(mapping) && nrow(mapping) > 0) {
+    missing_rankfiles <- setdiff(mapping$rankname, rank_names)
+    if (length(missing_rankfiles) > 0) {
+      log_msg(warning = paste0(
+        "names.txt references rank files that were not loaded: ",
+        paste(missing_rankfiles, collapse = ", "),
+        ". These entries will be skipped."
+      ))
+    }
+    mapping <- mapping[mapping$rankname %in% rank_names, , drop = FALSE]
+    if (nrow(mapping) > 0) {
+      mapped_order <- mapping$rankname
+      label_by_rank[mapping$rankname] <- mapping$rank_label
+      label_source_by_rank[mapping$rankname] <- "names.txt"
+    }
+  }
+
+  requested_order <- rankname_order %||% NULL
+  if (!is.null(requested_order)) {
+    requested_order <- normalize_rank_names(as.character(unlist(requested_order, use.names = FALSE)))
+    requested_order <- requested_order[!is.na(requested_order) & nzchar(requested_order)]
+    if (length(requested_order) == 0) {
+      requested_order <- NULL
+    }
+  }
+
+  if (!is.null(requested_order)) {
+    duplicated_ranknames <- requested_order[duplicated(requested_order)]
+    if (length(duplicated_ranknames) > 0) {
+      log_msg(warning = paste0(
+        "rankname_order contains duplicate labels: ",
+        paste(unique(duplicated_ranknames), collapse = ", "),
+        ". Keeping the first occurrence of each."
+      ))
+    }
+    requested_order <- unique(requested_order)
+    missing_ranknames <- setdiff(requested_order, rank_names)
+    if (length(missing_ranknames) > 0) {
+      log_msg(warning = paste0(
+        "rankname_order entries not present in ranks: ",
+        paste(missing_ranknames, collapse = ", "),
+        ". These names will be ignored."
+      ))
+    }
+    ordered_ranknames <- c(intersect(requested_order, rank_names), setdiff(rank_names, requested_order))
+  } else if (length(mapped_order) > 0) {
+    ordered_ranknames <- c(mapped_order, setdiff(rank_names, mapped_order))
+  } else {
+    ordered_ranknames <- rank_names
+  }
+
+  metadata <- data.frame(
+    rankname = ordered_ranknames,
+    rank_label = unname(label_by_rank[ordered_ranknames]),
+    rank_order = seq_along(ordered_ranknames),
+    rank_label_source = unname(label_source_by_rank[ordered_ranknames]),
+    stringsAsFactors = FALSE
+  )
+  metadata$rank_label <- repair_duplicate_rank_labels(metadata$rank_label)
+  metadata$rankname_factor <- factor(metadata$rankname, levels = metadata$rankname, ordered = TRUE)
+  metadata$rank_label_factor <- factor(metadata$rank_label, levels = metadata$rank_label, ordered = TRUE)
+  rownames(metadata) <- metadata$rankname
+  metadata
+}
+
+rank_label_map <- function(rank_metadata, ranknames = NULL) {
+  if (is.null(rank_metadata) || !is.data.frame(rank_metadata) ||
+      !all(c("rankname", "rank_label") %in% colnames(rank_metadata))) {
+    if (is.null(ranknames)) {
+      return(character(0))
+    }
+    return(stats::setNames(as.character(ranknames), as.character(ranknames)))
+  }
+  mapping <- stats::setNames(as.character(rank_metadata$rank_label), as.character(rank_metadata$rankname))
+  if (!is.null(ranknames)) {
+    missing <- setdiff(as.character(ranknames), names(mapping))
+    if (length(missing) > 0) {
+      mapping <- c(mapping, stats::setNames(missing, missing))
+    }
+    mapping <- mapping[as.character(ranknames)]
+  }
+  mapping
+}
+
+has_explicit_rank_labels <- function(rank_metadata, ranknames = NULL) {
+  if (is.null(rank_metadata) || !is.data.frame(rank_metadata) ||
+      !"rank_label_source" %in% colnames(rank_metadata)) {
+    return(FALSE)
+  }
+  md <- rank_metadata
+  if (!is.null(ranknames) && "rankname" %in% colnames(md)) {
+    md <- md[md$rankname %in% as.character(ranknames), , drop = FALSE]
+  }
+  any(md$rank_label_source != "default")
+}
+
+finalize_rank_inputs <- function(
+    rnkdfs,
+    rankfiledir = NULL,
+    rankname_order = NULL,
+    context = "rank inputs") {
+  rank_names <- names(rnkdfs)
+  if (!is.null(rank_names) && length(rank_names) == length(rnkdfs)) {
+    names(rnkdfs) <- normalize_rank_names(rank_names)
+  }
+  rnkdfs <- dedupe_rank_names(rnkdfs, context = context)
+  rank_metadata <- make_rank_metadata(
+    names(rnkdfs),
+    rankfiledir = rankfiledir,
+    rankname_order = rankname_order
+  )
+  if (nrow(rank_metadata) > 0) {
+    rnkdfs <- rnkdfs[rank_metadata$rankname]
+  }
+  list(
+    ranks = rnkdfs %>% ranks_dfs_to_lists(),
+    rank_metadata = rank_metadata
+  )
+}
+
 make_random_gct <- function(nrow = 10, ncol = 4) {
   set.seed(369)
   nrow <- max(nrow, 1)
@@ -185,17 +421,6 @@ create_rnkfiles_from_volcano <- function(
       return(.table)
     })
 
-
-  log_msg(msg = "trying to shorten names")
-
-  shorternames <- names(lst) %>%
-    stringr::str_extract(., pattern = "(?<=group_)([^.*]*)$")
-  log_msg(msg = paste0("shorter names are ", paste0(shorternames, "\n")))
-  if (!all(is.na(shorternames)) && length(unique(shorternames)) == length(names(lst))) {
-    names(lst) <- normalize_rank_names(shorternames)
-  } else {
-    log_msg(msg = "nas in shorter names, not reassigning")
-  }
   dedupe_rank_names(lst, context = "volcano files")
 }
 
@@ -356,7 +581,8 @@ save_individual_gsea_results <- function(
   results_list,
   savedir = "gsea_tables",
   replace = FALSE,
-  species = "Homo sapiens") {
+  species = "Homo sapiens",
+  rank_metadata = NULL) {
 
 if (is.null(replace)) replace <- FALSE
 
@@ -370,7 +596,11 @@ log_msg(msg = paste0("length results list :", length(results_list)))
     collection_name <- .y
     # Construct a comparison name map to shorten labels for files within this collection
     comparison_names <- names(result_list)
-    name_map <- util_tools$make_name_map(comparison_names)
+    name_map <- if (has_explicit_rank_labels(rank_metadata, comparison_names)) {
+      rank_label_map(rank_metadata, comparison_names)
+    } else {
+      util_tools$make_name_map(comparison_names)
+    }
     result_list %>% purrr::imap(~{
       result <- .x
       comparison_name <- .y
@@ -490,7 +720,7 @@ write_to_cache <- function(object, filename, cache_dir = NULL) {
 }
 
 
-load_and_process_ranks <- function(params) {
+load_and_process_rank_inputs <- function(params) {
   rankfiledir <- params$rankfiledir
   volcanodir <- params$volcanodir
   gct_path <- params$gct_path
@@ -503,6 +733,7 @@ load_and_process_ranks <- function(params) {
     FALSE
   )
   exclude_samples_from_data <- params$advanced$exclude_samples_from_data %||% FALSE
+  rankname_order <- params$extra$rankname_order %||% NULL
 
 
   log_msg(msg = paste0("ranks from : ", ranks_from))
@@ -517,57 +748,12 @@ load_and_process_ranks <- function(params) {
       log_msg(msg = paste0("found ", length(rnkfiles), " rankfiles"))
       rnkdfs <- rnkfiles %>% load_rnkfiles()
       names(rnkdfs) <- normalize_rank_names(rnkfiles)
-      rnkdfs <- dedupe_rank_names(rnkdfs, context = "cached rank files")
-
-        #fs::path_ext_remove() # this is no good
-
-
-      name_mapping_file <- file.path(rankfiledir, 'names.txt')
-      if (fs::file_exists(name_mapping_file)) {
-        log_msg(msg = paste0("found name mapping file: ", name_mapping_file))
-        name_mapping <- read_delim(name_mapping_file,
-          col_names = c("new", "old"),
-          delim = '=',
-           comment = '#',
-           show_col_types = F
-        ) %>% mutate(old = normalize_rank_names(old))
-
-        # fs::path_ext_remove(old))
-
-        missing_rankfiles <- setdiff(name_mapping$old, names(rnkdfs))
-        if (length(missing_rankfiles) > 0) {
-          log_msg(warning = paste0(
-            "names.txt references rank files that were not loaded: ",
-            paste(missing_rankfiles, collapse = ", "),
-            ". These entries will be skipped."
-          ))
-        }
-
-        duplicated_new_labels <- name_mapping$new[duplicated(name_mapping$new)]
-        if (length(duplicated_new_labels) > 0) {
-          log_msg(warning = paste0(
-            "names.txt contains duplicate target labels: ",
-            paste(unique(duplicated_new_labels), collapse = ", "),
-            ". Later mappings will overwrite earlier ones."
-          ))
-        }
-
-        for (ix in seq_len(nrow(name_mapping))) {
-          .new <- name_mapping[ix, ]$new
-          .old <- name_mapping[ix, ]$old
-          if (.old %in% names(rnkdfs)) {
-            rnkdfs[.new] <- rnkdfs[.old]
-            rnkdfs[.old] <- NULL
-          } else {
-            log_msg(debug = paste0("Skipping mapping for missing rank file: ", .old))
-          }
-        }
-
-      }
-
-      ranks_list <- rnkdfs %>% ranks_dfs_to_lists()
-
-      return(ranks_list)
+      return(finalize_rank_inputs(
+        rnkdfs,
+        rankfiledir = rankfiledir,
+        rankname_order = rankname_order,
+        context = "cached rank files"
+      ))
     } # exit and we're done
     log_msg(msg = "couldn't find any previously saved rnkfiles")
   }
@@ -617,8 +803,12 @@ load_and_process_ranks <- function(params) {
 
     rnkdfs %>% write_rnkfiles(dir = rankfiledir)
     log_msg(msg = paste0("length of retrieved rankfiles: ", length(rnkdfs)))
-    ranks_list <- rnkdfs %>% ranks_dfs_to_lists()
-    return(ranks_list)
+    return(finalize_rank_inputs(
+      rnkdfs,
+      rankfiledir = rankfiledir,
+      rankname_order = rankname_order,
+      context = "model rank files"
+    ))
   }
   if (ranks_from == "volcano") {
     if (is.null(volcanodir) || !file.exists(volcanodir)) {
@@ -630,8 +820,12 @@ load_and_process_ranks <- function(params) {
     names(rnkdfs) <- names(rnkdfs) %>%
       normalize_rank_names()
     log_msg(paste0("length of retrieved rankfiles: ", length(rnkdfs)))
-    ranks_list <- rnkdfs %>% ranks_dfs_to_lists()
-    return(ranks_list)
+    return(finalize_rank_inputs(
+      rnkdfs,
+      rankfiledir = rankfiledir,
+      rankname_order = rankname_order,
+      context = "volcano rank files"
+    ))
   }
   if (ranks_from == "gct" && !is.null(gct_path)) {
     apply_z_score <- zscore_emat
@@ -649,11 +843,20 @@ load_and_process_ranks <- function(params) {
       #fs::path_ext_remove()
     rnkdfs %>% write_rnkfiles(dir = rankfiledir)
     log_msg(msg = paste0("length of retrieved rankfiles: ", length(rnkdfs)))
-    ranks_list <- rnkdfs %>% ranks_dfs_to_lists()
+    rank_inputs <- finalize_rank_inputs(
+      rnkdfs,
+      rankfiledir = rankfiledir,
+      rankname_order = rankname_order,
+      context = "gct rank files"
+    )
   }
   # not sure if this level of flow is relevant, refactor later
-  if (!exists("ranks_list")) {
+  if (!exists("rank_inputs")) {
     stop("No rankfiles found, problem loading")
   }
-  return(ranks_list)
+  return(rank_inputs)
+}
+
+load_and_process_ranks <- function(params) {
+  load_and_process_rank_inputs(params)$ranks
 }

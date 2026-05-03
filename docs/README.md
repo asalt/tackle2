@@ -52,7 +52,7 @@ The order in which comparisons appear determines how combined plots, heatmaps, a
     - `sample_order` is a legacy alias; if you only supply `sample_order`, it is copied into `rankname_order` during parameter sanitisation.
     - The strings must match the comparison names exactly (case sensitive). Missing entries are dropped silently, so double-check spelling if your plots fall back to alphabetical order.
 
-2. **`names.txt`** – When you point the run at an existing rank directory, you can rename (and implicitly re-order) comparisons without touching the `.rnk` files. Drop a `names.txt` file next to the ranks with one mapping per line:
+2. **`names.txt`** – When you point the run at an existing rank directory, you can provide display labels and a preferred display order without touching canonical `.rnk` names. Drop a `names.txt` file next to the ranks with one mapping per line:
 
     ```text
     TreatmentA=Treated_vs_Control.rnk
@@ -60,10 +60,11 @@ The order in which comparisons appear determines how combined plots, heatmaps, a
     Rescue=Rescue_vs_Knockout.rnk
     ```
 
-    - The left side becomes the new comparison label; the right side references the filename (with optional `.rnk` suffix).
-    - Mappings are applied from top to bottom, so you can curate both naming and ordering in a single pass. Lines starting with `#` are treated as comments.
+    - The right side references the canonical rank filename (with optional `.rnk` suffix).
+    - The left side becomes the downstream display label; it does not rename `rankname` internally.
+    - Mappings are applied from top to bottom as display order. Duplicate labels are repaired with numeric suffixes and a warning. Lines starting with `#` are treated as comments.
 
-When a GCT file is supplied, column metadata (`gct@cdesc`) is leveraged for group annotations. If `rankname_order` lines up with the `group` column, those factors are re-leveled to match your configuration; otherwise, the pipeline falls back to the natural order of the rank files. For volcano-only runs, you can still steer ordering with `rankname_order` or `names.txt`, even though no additional metadata is attached.
+When a GCT file is supplied, column metadata (`gct@cdesc`) is leveraged for group annotations. If `rankname_order` lines up with the `group` column, those factors are re-leveled to match your configuration; otherwise, the pipeline falls back to the natural order of the rank files. For volcano-only runs, you can still steer ordering with canonical `rankname_order` or the row order in `names.txt`, even though no additional metadata is attached.
 
 Script main entry points are driven by python command line parsing and variable dispatch.
 

@@ -244,14 +244,15 @@ make_heatmap_fromgct <- function(
     column_labels = colnames(.mat), # id should always be here
 
     row_title_gp = grid::gpar(fontsize = 10.4, fontface="bold", hjust=1, vjust=1), #just="left"),  # remove just='left' to restore default behavior, defualt just = "center"
-    column_title_gp = grid::gpar(fontsize = 7.4, fontface="bold", hjust=1.4), #just="left"),  # remove just='left' to restore default behavior, defualt just = "center"
+    column_title_gp = grid::gpar(fontsize = 9.6, fontface="bold", hjust=1.4), #just="left"),  # remove just='left' to restore default behavior, defualt just = "center"
+    # TODO: column_title_gp dynamically set inversely to length of strings
     column_title_rot = 30,
 
     column_split = cut_by,
     top_annotation = ca,
     heatmap_legend_param = heatmap_legend_param,
-    row_names_gp = grid::gpar(fontsize = 7, fontface="bold"),
-    column_names_gp = grid::gpar(fontsize = 7, fontface="bold"),
+    row_names_gp = grid::gpar(fontsize = 9.6, fontface="bold"),
+    column_names_gp = grid::gpar(fontsize = 9.6, fontface="bold"),
     cluster_column_slices = cluster_column_slices,
     column_names_side = "top",
     left_annotation = row_annotation
@@ -312,6 +313,7 @@ plot_heatmap_of_edges <- function(
     parallel = FALSE,
     pathways_of_interest = NULL, # TODO: implement this. this has started somewhere
     sample_exclude = NULL,
+    rank_metadata = NULL,
     ...) {
   # transform for plotting
   .gct <- if (scale) util_tools$scale_gct(gct, group_by = scale_by) else gct
@@ -338,7 +340,7 @@ plot_heatmap_of_edges <- function(
 
     # Build a friendly mapping for comparison names to strip shared affixes
     comparison_names <- names(collection_results)
-    name_map <- util_tools$make_name_map(comparison_names)
+    name_map <- make_rank_display_name_map(comparison_names, rank_metadata)
 
     if (!is.null(combine_by)) {
       ranknames <- names(results_list[[collection_name]])
@@ -453,7 +455,7 @@ plot_heatmap_of_edges <- function(
           cluster_columns = cluster_columns,
           sample_order = sample_order,
           row_title = .row_title,
-          column_title = paste0(.id, "\n", str_wrap(str_replace_all(comparison_label, "_", " "), width=64)),
+          column_title = paste0(.id, "\n", format_display_label(comparison_label, wrap_width = 48)),
           cut_by = cut_by_val,
           meta_to_include = meta_to_include,
           meta_to_exclude = meta_to_exclude,
@@ -678,6 +680,149 @@ strip_pathway_leader <- function(x) {
   x
 }
 
+make_enrichplot_dirname <- function(filename_stub, pathway_name, fallback = "enrich") {
+  pathway_label <- strip_pathway_leader(pathway_name)
+  util_tools$safe_filename(
+    filename_stub,
+    pathway_label,
+    fallback = fallback,
+    max_chars = 60
+  )
+}
+
+contains_hyphenated_token <- function(x) {
+  x <- as.character(x)
+  x <- x[!is.na(x)]
+  if (length(x) == 0) {
+    return(FALSE)
+  }
+  any(stringr::str_detect(x, "(?<=[[:alnum:]])-(?=[[:alnum:]])"))
+}
+
+format_display_label <- function(
+    value,
+    wrap_width = NULL,
+    replace_underscores = TRUE,
+    replace_hyphens = FALSE) {
+  if (is.null(value)) {
+    return(NULL)
+  }
+
+  out <- as.character(value)
+  if (replace_underscores) {
+    out <- stringr::str_replace_all(out, "_", " ")
+  }
+  if (replace_hyphens) {
+    out <- stringr::str_replace_all(out, "-", " ")
+  }
+  out <- stringr::str_squish(out)
+  if (!is.null(wrap_width)) {
+    out <- stringr::str_wrap(out, width = wrap_width)
+  }
+  out
+}
+
+make_display_name_map <- function(strings,
+                                  min_affix_chars = 4,
+                                  min_remaining = 6) {
+  strings <- as.character(strings)
+  name_map <- util_tools$make_name_map(
+    strings,
+    min_affix_chars = min_affix_chars,
+    min_remaining = min_remaining,
+    delim = "[._\\s]"
+  )
+
+  removed_prefix <- attr(name_map, "removed_prefix")
+  removed_suffix <- attr(name_map, "removed_suffix")
+  removed_prefix <- if (is.null(removed_prefix)) "" else removed_prefix
+  removed_suffix <- if (is.null(removed_suffix)) "" else removed_suffix
+
+  if (contains_hyphenated_token(c(removed_prefix, removed_suffix))) {
+    log_msg(info = "preserving hyphenated comparison tokens in display labels")
+    name_map <- stats::setNames(strings, strings)
+    attr(name_map, "removed_prefix") <- ""
+    attr(name_map, "removed_suffix") <- ""
+  }
+
+  name_map
+}
+
+has_explicit_rank_labels <- function(rank_metadata, ranknames = NULL) {
+  if (is.null(rank_metadata) || !is.data.frame(rank_metadata) ||
+      !"rank_label_source" %in% colnames(rank_metadata)) {
+    return(FALSE)
+  }
+  md <- rank_metadata
+  if (!is.null(ranknames) && "rankname" %in% colnames(md)) {
+    md <- md[md$rankname %in% as.character(ranknames), , drop = FALSE]
+  }
+  any(md$rank_label_source != "default")
+}
+
+rank_label_map <- function(rank_metadata, ranknames = NULL) {
+  if (is.null(rank_metadata) || !is.data.frame(rank_metadata) ||
+      !all(c("rankname", "rank_label") %in% colnames(rank_metadata))) {
+    if (is.null(ranknames)) {
+      return(character(0))
+    }
+    return(stats::setNames(as.character(ranknames), as.character(ranknames)))
+  }
+  mapping <- stats::setNames(as.character(rank_metadata$rank_label), as.character(rank_metadata$rankname))
+  if (!is.null(ranknames)) {
+    missing <- setdiff(as.character(ranknames), names(mapping))
+    if (length(missing) > 0) {
+      mapping <- c(mapping, stats::setNames(missing, missing))
+    }
+    mapping <- mapping[as.character(ranknames)]
+  }
+  mapping
+}
+
+make_rank_display_name_map <- function(strings, rank_metadata = NULL) {
+  strings <- as.character(strings)
+  if (has_explicit_rank_labels(rank_metadata, strings)) {
+    return(rank_label_map(rank_metadata, strings))
+  }
+  make_display_name_map(strings)
+}
+
+rank_label_order <- function(rank_metadata, ranknames = NULL) {
+  if (is.null(rank_metadata) || !is.data.frame(rank_metadata) ||
+      !all(c("rankname", "rank_label", "rank_order") %in% colnames(rank_metadata))) {
+    return(NULL)
+  }
+  md <- rank_metadata
+  if (!is.null(ranknames)) {
+    md <- md[md$rankname %in% as.character(ranknames), , drop = FALSE]
+  }
+  md <- md[order(md$rank_order), , drop = FALSE]
+  as.character(md$rank_label)
+}
+
+apply_rank_labels_to_df <- function(df, rank_metadata = NULL) {
+  if (is.null(df) || !is.data.frame(df) || !"rankname" %in% colnames(df)) {
+    return(df)
+  }
+  if (!has_explicit_rank_labels(rank_metadata, unique(df$rankname))) {
+    return(df)
+  }
+  mapping <- rank_label_map(rank_metadata, unique(df$rankname))
+  df$rankname <- dplyr::recode(as.character(df$rankname), !!!mapping)
+  df
+}
+
+apply_rank_labels_to_rankorder <- function(rankorder, rank_metadata = NULL) {
+  if (!has_explicit_rank_labels(rank_metadata)) {
+    return(rankorder)
+  }
+  rankorder$curve <- apply_rank_labels_to_df(rankorder$curve, rank_metadata)
+  rankorder$edge <- apply_rank_labels_to_df(rankorder$edge, rank_metadata)
+  rankorder$ticks <- apply_rank_labels_to_df(rankorder$ticks, rank_metadata)
+  rankorder$stats <- apply_rank_labels_to_df(rankorder$stats, rank_metadata)
+  rankorder
+}
+
 # Function: prepare_data_for_barplot
 # Description: This function prepares the data for a barplot by taking in a dataframe as input.
 # Parameters:
@@ -753,6 +898,7 @@ barplot_with_numbers <- function(
     save_func = NULL,
     facet_order = NULL,
     nes_range = NULL, # or a list of len 2
+    rank_metadata = NULL,
     ...) {
 
   if (!is.null(nes_range)){
@@ -766,40 +912,38 @@ barplot_with_numbers <- function(
 
 
   custom_labeller <- function(value) {
-    wrapped_labels <- sapply(value, function(label) {
-      label %>%
-        str_replace_all("_", " ") %>%
-        str_wrap(width = 54)
-    })
-    return(wrapped_labels)
+    format_display_label(value, wrap_width = 54)
   }
   labeller_func <- custom_labeller
 
   # Format title/subtitle with less aggressive wrapping
-  formatted_title <- title %>%
-    stringr::str_replace_all("_", " ") %>%
-    stringr::str_wrap(width = 54)
-  formatted_subtitle <- if (is.null(subtitle)) NULL else subtitle %>%
-    stringr::str_replace_all("_", " ") %>%
-    stringr::str_wrap(width = 72)
+  formatted_title <- format_display_label(title, wrap_width = 54)
+  formatted_subtitle <- if (is.null(subtitle)) NULL else format_display_label(subtitle, wrap_width = 72)
 
+
+  if ("rankname" %in% names(sel)) {
+    # right here we make a mapping and rename for display
+    # for facetted plots
+    rankname_values <- unique(as.character(sel$rankname))
+    name_map <- make_rank_display_name_map(rankname_values, rank_metadata)
+    sel <- sel %>% dplyr::mutate(
+                          rankname=dplyr::recode(
+                                                 as.character(rankname),
+                                                 !!!name_map  # named vector
+                                                 )
+                          )
+    label_order <- if (has_explicit_rank_labels(rank_metadata, rankname_values)) {
+      rank_label_order(rank_metadata, rankname_values)
+    } else {
+      NULL
+    }
+    facet_order <- if (!is.null(label_order)) label_order else facet_order
+  }
 
   if (!is.null(facet_order)) {
     sel <- sel %>%
       mutate(rankname = factor(rankname, levels = facet_order, ordered = T)) %>%
       arrange(rankname)
-  }
-
-  if ("rankname" %in% names(sel)) {
-    # right here we make a mapping and rename for display
-    # for facetted plots
-    name_map <- util_tools$make_name_map(unique(sel$rankname))
-    sel <- sel %>% dplyr::mutate(
-                          rankname=dplyr::recode(
-                                                 rankname,
-                                                 !!!name_map  # named vector
-                                                 )
-                          )
   }
 
   # Dynamically choose a single y-axis font size based on longest label
@@ -814,10 +958,8 @@ barplot_with_numbers <- function(
     TRUE ~ 5.2
   )
   strip_label_chars <- if ("rankname" %in% names(sel)) {
-    sel$rankname %>% as.character() %>%
-      stringr::str_replace_all("\n", " ") %>%
-      stringr::str_replace_all("_", " ") %>%
-      stringr::str_squish()
+    format_display_label(sel$rankname) %>%
+      stringr::str_replace_all("\n", " ")
   } else {
     character(0)
   }
@@ -871,7 +1013,7 @@ barplot_with_numbers <- function(
       )
     ) +
     # Reference line at x=0 behind bars
-    geom_vline(xintercept = 0, colour = scales::alpha("#555555", 0.6), size = 0.4, show.legend = FALSE) +
+    geom_vline(xintercept = 0, colour = scales::alpha("#555555", 0.6), linewidth = 0.4, show.legend = FALSE) +
     # scale_color_gradient(low = "#0000ffee", high = "#ff0000ee") +  # Adjust colors to represent p-values
     # geom_point() +
     scale_fill_gradient2(
@@ -904,8 +1046,15 @@ barplot_with_numbers <- function(
       axis.text.y = element_text(size = axis_text_y_size, face = "bold"),
       axis.text.x = element_text(size = 7.0),
       plot.title = element_text(size = 14, face = "bold", hjust = 0),
-      strip.text.x = element_text(size = strip_text_size, face = "bold", hjust = 0.5),
-      plot.subtitle = element_text(hjust = 0)
+      strip.text.x = element_text(
+        size = strip_text_size,
+        face = "bold",
+        hjust = 0.5,
+        margin = margin(t = 2.5, r = 6, b = 2.5, l = 6)
+      ),
+      strip.clip = "off",
+      plot.subtitle = element_text(hjust = 0),
+      plot.margin = margin(t = 6, r = 10, b = 6, l = 6)
     )
 
   if (!is.null(nes_range)){
@@ -980,6 +1129,7 @@ all_barplots_with_numbers <- function(
     save_func = NULL,
     facet_order = NULL,
     limit = 20,
+    rank_metadata = NULL,
     ...) {
   if (!is.null(save_func)) {
     filename <- util_tools$safe_filename(
@@ -997,7 +1147,7 @@ all_barplots_with_numbers <- function(
       list_of_comparisons <- .x
       # Shorten comparison names by stripping shared affixes for path components
       comparison_names <- names(list_of_comparisons)
-      name_map <- util_tools$make_name_map(comparison_names)
+      name_map <- make_rank_display_name_map(comparison_names, rank_metadata)
       plts <- list_of_comparisons %>% imap(
         ~ {
           dataframe <- .x
@@ -1021,9 +1171,10 @@ all_barplots_with_numbers <- function(
               effective_limit <- min(.limit, pathway_count)
               .title <- comparison_label %||% comparison_name # %>% fs::path_file() %>% fs::path_ext_remove() #%>% gsub(pattern="_", replacement=" ", x=.)
 
-              rank_label <- sel$rankname %>% na.omit() %>% unique()
+              rank_label <- comparison_label %||% comparison_name
+              rank_label <- rank_label %>% na.omit() %>% unique()
               rank_label <- if (length(rank_label) == 0) NULL else rank_label %>%
-                stringr::str_replace_all("_", " ") %>%
+                format_display_label() %>%
                 paste(collapse = ", ")
               base_subtitle <- if (!is.null(rank_label)) {
                 paste0("rank: ", rank_label, " • top ", effective_limit)
@@ -1061,6 +1212,7 @@ all_barplots_with_numbers <- function(
                 save_func = local_save_func,
                 facet_order = facet_order,
                 nes_range = nes_range,
+                rank_metadata = rank_metadata,
                 ...
               )
 
@@ -1081,6 +1233,7 @@ do_combined_barplots <- function(
     save_func = NULL,
     facet_order = NULL,
     limit = 20,
+    rank_metadata = NULL,
     ...) {
   genesets <- names(results_list)
 
@@ -1147,6 +1300,7 @@ do_combined_barplots <- function(
         nes_range = nes_range,
         save_func = local_save_func,
         facet_order = facet_order,
+        rank_metadata = rank_metadata,
         ...
       )
       return(p)
@@ -1444,6 +1598,14 @@ plot_results_one_collection <- function(
 
   rownames(dfp) <- dfp$pathway
   dfp <- dfp[, metadata$id, drop = FALSE] # select ranknames as ordered inside metadata dataframe
+  # this bugs out but it shouldn't:
+  # a solution for this, which we shouldn't actually need, is
+  # subsel <- setdiff(metadata$id, colnames(dfp); dfp <- dfp[, subsel, drop = FALSE]
+  # tryCatch(
+  #   dfp <- dfp[, metadata$id, drop = FALSE] # select ranknames as ordered inside metadata dataframe
+  #   ,
+  #   error = function(x) browser()
+  # )
 
   # dfp["pathway"] <- NULL # now remove this column to exclude from heatmap
 
@@ -1703,6 +1865,7 @@ plot_top_ES_across <- function(
     width = 3.4,
     height = 4,
     pathways_of_interest = NULL,
+    rank_metadata = NULL,
     ...) {
   if (!"list" %in% class(gsea_results)) {
     stop(cat("gsea_results should be a list of data frames"))
@@ -1746,7 +1909,8 @@ plot_top_ES_across <- function(
         panel_width = width,
         panel_height = height,
         combined_show_ticks = combined_show_ticks,
-        pathways_of_interest = pathways_of_interest
+        pathways_of_interest = pathways_of_interest,
+        rank_metadata = rank_metadata
       )
       return(plts)
     })
@@ -1770,6 +1934,7 @@ plot_top_ES <- function(
     combined_label_size = 1.75,
     filter_on_mainpathway = TRUE,
     pathways_of_interest = NULL,
+    rank_metadata = NULL,
     ...) {
   #
 
@@ -1838,20 +2003,19 @@ plot_top_ES <- function(
       log_msg(msg = paste0("show ticks: ", combined_show_ticks))
 
       wrap_width <- getOption(util_tools$pkg_option_name("enrichplot_title_wrap"), 40)
-      .plt <- plotES_combined(rankorder,
-        title = pathway_name %>% str_replace_all("_", " ") %>% str_wrap(width = wrap_width),
+      rankorder_display <- apply_rank_labels_to_rankorder(rankorder, rank_metadata)
+      .plt <- plotES_combined(rankorder_display,
+        title = format_display_label(pathway_name, wrap_width = wrap_width),
         show_ticks = combined_show_ticks,
         label_size = combined_label_size,
       ) # will be faceted if "facet" in .x
 
 
       if (!is.null(save_func)) {
-        pathway_label <- strip_pathway_leader(pathway_name)
-        newdir <- util_tools$safe_filename(
+        newdir <- make_enrichplot_dirname(
           get_arg(save_func, "filename"),
-          pathway_label,
-          fallback = "combined_dir",
-          max_chars = 60
+          pathway_name,
+          fallback = "combined_dir"
         )
         newpath <- util_tools$safe_subdir(get_arg(save_func, "path"), newdir)
         newfilename <- util_tools$safe_filename(
@@ -1895,7 +2059,7 @@ plot_top_ES <- function(
       rankorders <- .x
       pathway_name <- .y
       # Build name mapping for comparison labels within this pathway's rankorders
-      name_map <- util_tools$make_name_map(names(rankorders))
+      name_map <- make_rank_display_name_map(names(rankorders), rank_metadata)
 
       rankorders %>% purrr::imap(~ {
         rankorder <- .x
@@ -1907,8 +2071,8 @@ plot_top_ES <- function(
             return(NULL)
         }
         wrap_width <- getOption(util_tools$pkg_option_name("enrichplot_title_wrap"), 54)
-        comp_title <- comparison_label %>% stringr::str_replace_all("_", " ") %>% stringr::str_wrap(width = wrap_width)
-        path_title <- pathway_name %>% stringr::str_replace_all("_", " ") %>% stringr::str_wrap(width = wrap_width)
+        comp_title <- format_display_label(comparison_label, wrap_width = wrap_width)
+        path_title <- format_display_label(pathway_name, wrap_width = wrap_width)
         .title <- paste0(comp_title, "\n", path_title)
         .subtitle <- ""
         if (nrow(.stats) == 1) {
@@ -1923,11 +2087,10 @@ plot_top_ES <- function(
 
 
         if (!is.null(save_func)) {
-          newdir <- util_tools$safe_filename(
+          newdir <- make_enrichplot_dirname(
             get_arg(save_func, "filename"),
             pathway_name,
-            fallback = "enrich",
-            max_chars = 60
+            fallback = "enrich"
           )
           newpath <- util_tools$safe_subdir(get_arg(save_func, "path"), newdir)
           newfilename <- util_tools$safe_filename(comparison_label, fallback = "comparison")
@@ -1959,7 +2122,7 @@ plotES_combined <- function(enplot_data, label_size = 1.85, title = "", show_tic
     geom_label_repel(
       data = curve %>% group_by(rankname) %>% arrange(-abs(ES)) %>% slice_head(n = 1) %>% ungroup(),
       # what is this doing? above?
-      aes(label = rankname %>% stringr::str_replace_all("_", " ") %>% stringr::str_wrap(width = 28),
+      aes(label = format_display_label(rankname, wrap_width = 28),
         x = rank, y = ES, color = rankname),
       # nudge_x = 0.5,
       # nudge_y = 0.5,
