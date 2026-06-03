@@ -17,6 +17,87 @@ suppressPackageStartupMessages(library(rlang))
 # suppressPackageStartupMessages(library(rmdformats))
 
 
+is_empty_enplot_combine_by <- function(combine_by) {
+  if (is.null(combine_by) || length(combine_by) == 0) {
+    return(TRUE)
+  }
+  if (is.logical(combine_by) && length(combine_by) == 1 && isFALSE(combine_by)) {
+    return(TRUE)
+  }
+  if (all(is.na(combine_by))) {
+    return(TRUE)
+  }
+  combine_by_chr <- trimws(as.character(combine_by))
+  all(!nzchar(combine_by_chr))
+}
+
+order_enplot_combine_df <- function(combine_by_df, rankname_order = NULL) {
+  if (is.null(combine_by_df) || nrow(combine_by_df) == 0 || is.null(rankname_order)) {
+    return(combine_by_df)
+  }
+
+  rank_order <- match(combine_by_df$rankname, as.character(rankname_order))
+  rank_order[is.na(rank_order)] <- length(rankname_order) + seq_len(sum(is.na(rank_order)))
+  combine_by_df$rank_order <- rank_order
+  combine_by_df <- combine_by_df %>%
+    dplyr::arrange(.data$rank_order)
+
+  # Facet values are metadata groups, not ranknames; derive their order from first appearance.
+  facet_values <- as.character(combine_by_df$facet)
+  combine_by_df$facet <- factor(facet_values, levels = unique(facet_values), ordered = TRUE)
+  combine_by_df$rank_order <- NULL
+  rownames(combine_by_df) <- combine_by_df$rankname
+  combine_by_df
+}
+
+make_enplot_combine_specs <- function(
+    combine_by,
+    metadata,
+    rankname_order = NULL,
+    process_cut_by_fn) {
+  if (is_empty_enplot_combine_by(combine_by) || is.null(metadata)) {
+    return(list(list(name = "all", combine_by = NULL)))
+  }
+
+  combine_by_values <- as.character(unlist(combine_by, use.names = FALSE))
+  combine_by_values <- trimws(combine_by_values)
+  combine_by_values <- combine_by_values[!is.na(combine_by_values) & nzchar(combine_by_values)]
+  if (length(combine_by_values) == 0) {
+    return(list(list(name = "all", combine_by = NULL)))
+  }
+
+  ranknames <- rownames(metadata)
+  default_rownames <- identical(ranknames, as.character(seq_len(nrow(metadata))))
+  if (is.null(ranknames) || any(!nzchar(ranknames)) || default_rownames) {
+    if ("id" %in% colnames(metadata)) {
+      ranknames <- as.character(metadata$id)
+    } else {
+      stop("metadata must have rownames or an id column for enplot combine routing")
+    }
+  }
+
+  specs <- purrr::map(combine_by_values, function(combine_by_value) {
+    splits <- process_cut_by_fn(combine_by_value, metadata)
+    if (is.null(splits)) {
+      return(list(name = "all", combine_by = NULL))
+    }
+
+    combine_by_df <- data.frame(
+      id = ranknames,
+      rankname = ranknames,
+      facet = splits,
+      stringsAsFactors = FALSE
+    )
+    rownames(combine_by_df) <- combine_by_df$rankname
+    combine_by_df <- order_enplot_combine_df(combine_by_df, rankname_order = rankname_order)
+
+    list(name = combine_by_value, combine_by = combine_by_df)
+  })
+
+  duplicate_names <- duplicated(vapply(specs, `[[`, character(1), "name"))
+  specs[!duplicate_names]
+}
+
 
 run <- function(params) {
   # == local
@@ -326,6 +407,39 @@ run <- function(params) {
       all_gsea_results <- fgsea_tools$concat_results_all_collections(results_list)
       # all_gsea_results %>% saveRDS(file = file.path(savedir, 'allgsearesults.RDS'))
 
+      # Build the sample-excluded output view once so tables, DB writes, and plots agree.
+      if (exists("gct") && !is.null(gct) && (params$ranks_from == "gct")) {
+        metadata <- gct@cdesc
+        possible_group_order <- rankname_order %||% NULL
+        if ((!is.null(possible_group_order)) && ("group" %in% colnames(metadata)) && all(possible_group_order %in% metadata$group)) {
+          metadata <- metadata %>%
+            mutate(group = factor(group, levels = possible_group_order, ordered = T)) %>%
+            arrange(group)
+        }
+      } else {
+        metadata <- NULL
+      }
+
+      metadata_for_outputs <- util_tools$filter_metadata_samples(metadata, sample_exclude)
+      results_list_for_outputs <- util_tools$filter_results_by_rankname(results_list, sample_exclude)
+      all_gsea_results_for_outputs <- util_tools$filter_gsea_results(all_gsea_results, sample_exclude)
+      ranks_list_for_outputs <- util_tools$filter_named_list(ranks_list, sample_exclude)
+      rank_metadata_for_outputs <- rank_metadata[rank_metadata$rankname %in% names(ranks_list_for_outputs), , drop = FALSE]
+      rankname_order_for_outputs <- rank_metadata_for_outputs$rankname
+
+      metadata_for_plots <- metadata_for_outputs
+      results_list_for_plots <- results_list_for_outputs
+      all_gsea_results_for_plots <- all_gsea_results_for_outputs
+      ranks_list_for_plots <- ranks_list_for_outputs
+      rank_metadata_for_plots <- rank_metadata_for_outputs
+      rankname_order_for_plots <- rankname_order_for_outputs
+
+      if (length(sample_exclude) > 0) {
+        log_msg(info = paste0(
+          "sample_exclude: filtered downstream outputs for ", length(sample_exclude), " sample(s)"
+        ))
+      }
+
       if (db_enabled) {
         con <- NULL
         tryCatch(
@@ -360,7 +474,7 @@ run <- function(params) {
             }
 
             if (isTRUE(db_cfg$write_results)) {
-              purrr::imap(results_list, ~ {
+              purrr::imap(results_list_for_outputs, ~ {
                 collection_name <- .y
                 comparison_list <- .x
                 purrr::imap(comparison_list, ~ {
@@ -396,18 +510,18 @@ run <- function(params) {
 
       # ======= save
 
-      ._ <- results_list %>%
+      ._ <- results_list_for_outputs %>%
         io_tools$save_individual_gsea_results(
           savedir = file.path(savedir, "gsea_tables"),
           replace = params$advanced$replace,
           species = species,
-          rank_metadata = rank_metadata
+          rank_metadata = rank_metadata_for_outputs
         )
 
       # maybe save pivoted file. gets extremely big extremely quickly
       if (params$advanced$pivot_gsea_results == TRUE) {
         log_msg(msg = "pivoting gsea results")
-        all_gsea_results %>% io_tools$save_pivoted_gsea_results(
+        all_gsea_results_for_outputs %>% io_tools$save_pivoted_gsea_results(
           savedir = file.path(savedir, "gsea_tables"),
           replace = params$advanced$replace,
           species = species
@@ -416,32 +530,6 @@ run <- function(params) {
 
 
       # now we plot results
-      # TODO better and earlier handle metadata loading
-      if (exists("gct") && !is.null(gct) && (params$ranks_from == "gct")) {
-        metadata <- gct@cdesc
-        possible_group_order <- rankname_order %||% NULL
-        if ((!is.null(possible_group_order)) && ("group" %in% colnames(metadata)) && all(possible_group_order %in% metadata$group)) {
-          metadata <- metadata %>%
-            mutate(group = factor(group, levels = possible_group_order, ordered = T)) %>%
-            arrange(group)
-        }
-      } else {
-        metadata <- NULL
-      }
-
-      metadata_for_plots <- util_tools$filter_metadata_samples(metadata, sample_exclude)
-      results_list_for_plots <- util_tools$filter_results_by_rankname(results_list, sample_exclude)
-      all_gsea_results_for_plots <- util_tools$filter_gsea_results(all_gsea_results, sample_exclude)
-      ranks_list_for_plots <- util_tools$filter_named_list(ranks_list, sample_exclude)
-      rank_metadata_for_plots <- rank_metadata[rank_metadata$rankname %in% names(ranks_list_for_plots), , drop = FALSE]
-      rankname_order_for_plots <- rank_metadata_for_plots$rankname
-
-      if (length(sample_exclude) > 0) {
-        log_msg(info = paste0(
-          "sample_exclude: filtered plot inputs for ", length(sample_exclude), " sample(s)"
-        ))
-      }
-
       # pca
       # =============
       if (params$pca$do == TRUE) { # TODO: this fails if metadata not right and won't propagate rankname_order down
@@ -670,37 +758,6 @@ run <- function(params) {
 
       log_msg(msg = paste0("maybe plot edges"))
 
-      # ===== plot edgse and es
-      # this part is messy
-      # first is metadata organization to determine if and how to aggregate curves
-      # this is nto used right now for heatmap_gene
-      # it is used for plot_top_ES_across
-      combine_by <- params$enplot$combine_by %||% params$combine_by %||% NULL
-      combine_by_df <- NULL
-      if (!is.null(combine_by) && !is.null(metadata_for_plots)) {
-        combine_by_grid <- expand.grid(combine_by_val=combine_by, stringsAsFactors = FALSE)
-        combine_by_grid %>% purrr::pmap(
-        ~{
-            params = list(...)
-            combine_by_val <- params$combine_by_val
-            splits <- util_tools$process_cut_by(combine_by_val, metadata_for_plots)
-            #if (!combine_by_val %in% colnames(metadata)) {
-            if (is.null(splits)){
-              combine_by_df <- NULL
-            } else {
-              combine_by_df <- data.frame(id=rownames(metadata_for_plots), facet=splits)
-              rownames(combine_by_df) <- combine_by_df$id
-              if (!is.null(rankname_order_for_plots)) {
-                combine_by_df <- combine_by_df %>%
-                  mutate(facet = factor(facet, levels = rankname_order_for_plots, ordered = T)) %>%
-                  arrange(facet)
-              }
-          }
-        })
-      }
-
-
-
       if (is.null(gct) && params$heatmap_gene$do == TRUE) {
           log_msg(msg = "heatmap_gene$do set to true but gct is NULL")
       }
@@ -736,56 +793,39 @@ run <- function(params) {
       # print(genesets_list_of_lists)
       # print(save_func)
 
-      # ===== plot edgse and es
-      # this part is messy
-      # first is metadata organization to determine if and how to aggregate curves
-      # this is nto used right now for heatmap_gene
-      # it is used for plot_top_ES_across
-      combine_by <- params$enplot$combine_by %||% params$combine_by %||% NULL
-      combine_by_df <- NULL
-      #if (!is.null(combine_by) && !is.null(metadata)) {
-      if (params$enplot$do_combined == TRUE) {
-        combine_by_grid <- expand.grid(combine_by_val=combine_by, stringsAsFactors = FALSE)
+      enplot_combine_specs <- make_enplot_combine_specs(
+        combine_by = params$enplot$combine_by %||% params$combine_by %||% NULL,
+        metadata = metadata_for_plots,
+        rankname_order = rankname_order_for_plots,
+        process_cut_by_fn = util_tools$process_cut_by
+      )
+
+      if (isTRUE(params$enplot$do_combined)) {
         .enplot_limit <- params$enplot$limit %||% 20
-        ._ <- combine_by_grid %>% purrr::pmap(
-        ~{
-            params = list(...)
-            combine_by_val <- params$combine_by_val
-            splits <- util_tools$process_cut_by(combine_by_val, metadata_for_plots)
-            if (is.null(splits)){
-              combine_by_df <- NULL
-            } else {
-              combine_by_df <- data.frame(id=rownames(metadata_for_plots), facet=splits)
-              rownames(combine_by_df) <- combine_by_df$id
-              combine_by_df$rankname <- combine_by_df$id
-            }
-            if ((!is.null(rankname_order_for_plots)) && (!is.null(combine_by_df))) {
-              combine_by_df <- combine_by_df %>%
-                mutate(facet = factor(facet, levels = rankname_order_for_plots, ordered = T)) %>%
-                arrange(facet)
-            }
-
-            log_msg(debug = paste0("enplot limit: ", .enplot_limit))
-            ._ <- plot_tools$plot_top_ES_across(all_gsea_results_for_plots,
-              ranks_list = ranks_list_for_plots,
-              genesets_list_of_lists,
-              save_func = save_func,
-              limit = .enplot_limit,
-              #do_individual = params$enplot$do_individual %||% TRUE,
-              do_individual = FALSE, # becase we do it down below
-              do_combined = params$enplot$do_combined %||% TRUE,
-              combine_by = combine_by_df, # this is metadata table rankname and facet if exists
-              combine_by_name = combine_by_val,
-              width = params$enplot$width %||% 5.4,
-              height = params$enplot$height %||% 4.0,
-              pathways_of_interest = pathways_of_interest,
-              combined_show_ticks = params$enplot$combined_show_ticks %||% FALSE,
-              combined_label_size = params$enplot$combined_label_size %||% 1.85,
-              rank_metadata = rank_metadata_for_plots
-            )
-
-
+        purrr::walk(enplot_combine_specs, function(enplot_spec) {
+          log_msg(debug = paste0(
+            "enplot limit: ", .enplot_limit,
+            "; combine_by: ", enplot_spec$name
+          ))
+          plot_tools$plot_top_ES_across(all_gsea_results_for_plots,
+            ranks_list = ranks_list_for_plots,
+            genesets_list_of_lists,
+            save_func = save_func,
+            limit = .enplot_limit,
+            do_individual = FALSE,
+            do_combined = TRUE,
+            combine_by = enplot_spec$combine_by,
+            combine_by_name = enplot_spec$name,
+            width = params$enplot$width %||% 5.4,
+            height = params$enplot$height %||% 4.0,
+            pathways_of_interest = pathways_of_interest,
+            combined_show_ticks = params$enplot$combined_show_ticks %||% FALSE,
+            combined_label_size = params$enplot$combined_label_size %||% 1.85,
+            rank_metadata = rank_metadata_for_plots
+          )
         })
+      } else {
+        log_msg(info = "skipping combined enrichplots (params.enplot.do_combined is FALSE)")
       }
 
       if (isTRUE(params$enplot$do_individual)) {

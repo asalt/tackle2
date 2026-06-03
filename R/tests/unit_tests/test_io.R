@@ -47,6 +47,18 @@ test_that("ranks_dfs_to_lists returns correct list structure and naming", {
   expect_equal(result[[2]], c(gene4 = -0.5, gene5 = 1.2))
 })
 
+test_that("ranks_dfs_to_lists drops non-finite and duplicate rank entries", {
+  df <- data.frame(
+    id = c("gene1", "gene1", "gene2", "gene2", "", NA, "gene3", "gene4"),
+    value = c(2.3, 9.9, NA, 1.1, 4.2, 5.5, Inf, -0.7)
+  )
+
+  result <- io_tools$ranks_dfs_to_lists(list(sample_A = df))
+
+  expect_named(result$sample_A, c("gene1", "gene2", "gene4"))
+  expect_equal(result$sample_A, c(gene1 = 2.3, gene2 = 1.1, gene4 = -0.7))
+})
+
 test_that("create_rnkfiles_from_volcano processes files correctly", {
   withr::with_tempdir({
     # Create a temporary directory and some sample files
@@ -467,6 +479,31 @@ test_that("save_individual_gsea_results exports leadingEdge list column", {
     expect_true("leadingEdge" %in% colnames(exported))
     expect_true(all(nzchar(exported$leadingEdge)))
     expect_true(any(stringr::str_detect(exported$leadingEdge, "gene1")))
+  })
+})
+
+test_that("save_individual_gsea_results preserves common suffixes in filenames", {
+  withr::with_tempdir({
+    out_dir <- file.path(getwd(), "gsea_tables")
+    res <- readRDS(file.path(here("R/tests/unit_tests/fixtures/fgsea_basic_results.rds")))
+    base_res <- dplyr::filter(res, rankname == "sample_A")
+    results_list <- list(
+      H = list(
+        `groupABC_A4B8-Sunk_My_Battleship_minus_groupABC_Control_X9Q2` = base_res,
+        `groupDEF_A4B8-Sunk_My_Battleship_minus_groupDEF_Control_X9Q2` = base_res
+      )
+    )
+
+    io_tools$save_individual_gsea_results(
+      results_list = results_list,
+      savedir = out_dir,
+      replace = TRUE
+    )
+
+    files <- basename(fs::dir_ls(out_dir, glob = "*.tsv"))
+    expect_equal(length(files), 2)
+    expect_true(all(stringr::str_detect(files, "Control_X9Q2")))
+    expect_false(any(stringr::str_detect(files, "group(ABC|DEF)\\.tsv$")))
   })
 })
 

@@ -281,9 +281,50 @@ fgsea_cache_manager <- function(
   }
 }
 
+sanitize_rank_vector <- function(rankobj, rank_name = NULL, logger = NULL) {
+  if (is.null(logger)) logger <- log_msg
+  label <- if (!is.null(rank_name) && length(rank_name) > 0 && !is.na(rank_name[[1]]) && nzchar(as.character(rank_name[[1]]))) {
+    as.character(rank_name[[1]])
+  } else {
+    "unnamed rank"
+  }
+
+  if (is.null(rankobj) || length(rankobj) == 0 || is.null(names(rankobj))) {
+    logger(warning = paste0("rank ", label, ": no named rank values available"))
+    return(NULL)
+  }
+
+  values <- suppressWarnings(as.numeric(rankobj))
+  ids <- trimws(as.character(names(rankobj)))
+  valid <- !is.na(ids) & nzchar(ids) & is.finite(values)
+  dropped_invalid <- sum(!valid)
+  if (dropped_invalid > 0) {
+    logger(warning = paste0(
+      "rank ", label, ": dropping ", dropped_invalid,
+      " rank value(s) with missing names or non-finite values"
+    ))
+  }
+  values <- values[valid]
+  ids <- ids[valid]
+  if (length(values) == 0) {
+    logger(warning = paste0("rank ", label, ": no usable rank values remain"))
+    return(NULL)
+  }
+
+  duplicate_values <- duplicated(ids)
+  if (any(duplicate_values)) {
+    logger(warning = paste0(
+      "rank ", label, ": dropping ", sum(duplicate_values),
+      " duplicate gene id rank value(s); keeping first occurrence"
+    ))
+  }
+  stats::setNames(values[!duplicate_values], ids[!duplicate_values])
+}
+
 run_one <- function(
     rankobj = NULL,
     geneset = NULL,
+    rank_name = NULL,
     minSize = 15,
     maxSize = 500,
     collapse = FALSE,
@@ -291,6 +332,11 @@ run_one <- function(
     ...) {
   if (is.null(logger)) logger <- log_msg
   logger(msg = paste0("starting run_one"))
+
+  rankobj <- sanitize_rank_vector(rankobj, rank_name = rank_name, logger = logger)
+  if (is.null(rankobj)) {
+    return(NULL)
+  }
 
   # to look for duplicate gene names
   # rankobj %>% names %>% table %>% as.data.frame %>% pull(Freq) %>% max
@@ -379,10 +425,11 @@ run_all_rankobjs <- function(
     workers <- future::availableCores() - 1
     options(future.globals.maxSize = 20000 * 1024^2)
     logger(msg = paste0("using ", workers, " workers"))
-    .map_func <- furrr::future_map
+    .map_func <- furrr::future_imap
   } else {
-    .map_func <- purrr::map
+    .map_func <- purrr::imap
   }
+  requested_rank_names <- names(rankobjs)
 
   fgsea_args <- list(
     geneset = pathway,
@@ -408,7 +455,7 @@ run_all_rankobjs <- function(
     cache_results <- NULL
   }
 
-  results <- rankobjs %>% .map_func(~ do.call(run_one, c(list(rankobj = .), fgsea_args)))
+  results <- rankobjs %>% .map_func(~ do.call(run_one, c(list(rankobj = .x, rank_name = .y), fgsea_args)))
   results <- Filter(Negate(is.null), results)
   # print(paste0('length rankobjs : ', length(rankobjs)))
   # print(paste0('length results : ', length(results)))
@@ -468,6 +515,15 @@ run_all_rankobjs <- function(
     Filter(function(x) !is.null(x), cache_results),
     Filter(function(x) !is.null(x), results)
   )
+
+  missing_results <- setdiff(requested_rank_names, names(final_results))
+  if (length(missing_results) > 0) {
+    logger(warning = paste0(
+      "fgsea returned no results for ",
+      length(missing_results), " rank(s): ",
+      paste(missing_results, collapse = ", ")
+    ))
+  }
 
   return(final_results)
 }

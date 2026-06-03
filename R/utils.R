@@ -101,6 +101,9 @@ clean_args <- function(params, root_dir = "/") {
   options(structure(list(params$advanced$loglevel), names = pkg_option_name("loglevel")))
 
   logfile <- params$advanced$logfile %||% file.path(params$savedir, "run.log")
+  if (!is.null(logfile) && length(logfile) == 1L && logfile == "savedir") {
+    logfile <- file.path(params$savedir, "run.log")
+  }
   options(structure(list(logfile), names = pkg_option_name("log_msg_filename")))
   params$advanced$logfile <- logfile
 
@@ -616,7 +619,9 @@ safe_filename <- function(..., fallback = "file", max_chars = 80, delim = "_") {
 strip_common_affixes <- function(strings,
                                  min_affix_chars = 4,
                                  min_remaining = 6,
-                                 delim = "[._\\-\\s]") {
+                                 delim = "[._\\-\\s]",
+                                 strip_prefix = TRUE,
+                                 strip_suffix = FALSE) {
   strings <- as.character(strings)
   if (length(strings) < 2) {
     return(list(values = strings, prefix = "", suffix = ""))
@@ -631,6 +636,8 @@ strip_common_affixes <- function(strings,
   # discard tiny affixes
   if (nchar(pref) < min_affix_chars) pref <- ""
   if (nchar(suf)  < min_affix_chars) suf  <- ""
+  if (!isTRUE(strip_prefix)) pref <- ""
+  if (!isTRUE(strip_suffix)) suf <- ""
 
   # Helper to apply selected affixes
   apply_affix <- function(x, use_pref = TRUE, use_suf = TRUE) {
@@ -676,6 +683,8 @@ make_name_map <- function(strings,
                           min_affix_chars = 4,
                           min_remaining = 6,
                           delim = "[._\\-\\s]",
+                          strip_prefix = TRUE,
+                          strip_suffix = FALSE,
                           allow_stem_stripping = TRUE,
                           min_stem_len = 4) {
   # Allow runtime toggle via option tackle2_name_map_strip_stems
@@ -684,11 +693,13 @@ make_name_map <- function(strings,
   res <- strip_common_affixes(strings,
                               min_affix_chars = min_affix_chars,
                               min_remaining = min_remaining,
-                              delim = delim)
+                              delim = delim,
+                              strip_prefix = strip_prefix,
+                              strip_suffix = strip_suffix)
   cleaned <- res$values
   names(cleaned) <- strings
   # Log once if anything changed
-  if (!identical(strings, cleaned)) {
+  if (!identical(strings, unname(cleaned))) {
     msg <- paste0(
       "shortened labels by stripping",
       if (nzchar(res$prefix)) paste0(" prefix '", res$prefix, "'") else "",

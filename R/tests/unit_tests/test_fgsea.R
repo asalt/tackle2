@@ -97,6 +97,45 @@ test_that("test fgsea runone", {
   )
 })
 
+test_that("rank vector sanitizer removes unusable stats deterministically", {
+  warnings <- character(0)
+  logger <- function(msg = NULL, warning = NULL, ...) {
+    if (!is.null(warning)) warnings <<- c(warnings, warning)
+  }
+  rank <- stats::setNames(
+    c(2.0, 9.0, NA, 1.5, Inf, -0.5),
+    c("gene1", "gene1", "gene2", "gene2", "gene3", "")
+  )
+
+  cleaned <- fgsea_tools$sanitize_rank_vector(rank, rank_name = "sample_A", logger = logger)
+
+  expect_equal(cleaned, c(gene1 = 2.0, gene2 = 1.5))
+  expect_true(any(grepl("non-finite", warnings)))
+  expect_true(any(grepl("duplicate gene id", warnings)))
+})
+
+test_that("run_all_rankobjs warns when ranks produce no fgsea result", {
+  fgsea_tools_missing <- new.env()
+  source(file.path(src_dir, "./fgsea.R"), local = fgsea_tools_missing)
+  fgsea_tools_missing$run_one <- function(...) NULL
+
+  warnings <- character(0)
+  logger <- function(msg = NULL, warning = NULL, ...) {
+    if (!is.null(warning)) warnings <<- c(warnings, warning)
+  }
+
+  result <- fgsea_tools_missing$run_all_rankobjs(
+    pathway = list(pathway_A = c("gene1", "gene2")),
+    rankobjs = list(sample_A = c(gene1 = 2.0, gene2 = -1.0)),
+    cache = FALSE,
+    parallel = FALSE,
+    logger = logger
+  )
+
+  expect_equal(length(result), 0)
+  expect_true(any(grepl("fgsea returned no results", warnings)))
+})
+
 
 
 test_that("test run one collapse", {

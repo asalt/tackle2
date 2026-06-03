@@ -1862,6 +1862,7 @@ plot_top_ES_across <- function(
     combine_by_name = NULL,
     save_func = NULL,
     combined_show_ticks = FALSE,
+    combined_label_size = 1.85,
     width = 3.4,
     height = 4,
     pathways_of_interest = NULL,
@@ -1909,6 +1910,7 @@ plot_top_ES_across <- function(
         panel_width = width,
         panel_height = height,
         combined_show_ticks = combined_show_ticks,
+        combined_label_size = combined_label_size,
         pathways_of_interest = pathways_of_interest,
         rank_metadata = rank_metadata
       )

@@ -52,10 +52,59 @@ test_that("display labels preserve hyphenated contrast tokens", {
 test_that("display name map does not strip hyphenated suffixes", {
   labels <- c("group_alpha_x-y", "group_beta_x-y")
   name_map <- plot_tools$make_display_name_map(labels)
+  name_values <- unname(as.character(name_map))
 
   expect_equal(unname(names(name_map)), labels)
-  expect_true(all(grepl("x-y$", unname(name_map))))
-  expect_false(any(unname(name_map) %in% c("alpha", "beta")))
+  expect_true(all(grepl("x-y$", name_values)))
+  expect_false(any(name_values %in% c("alpha", "beta")))
+})
+
+test_that("display name map preserves common cell-line suffixes", {
+  labels <- c(
+    "groupABC_A4B8-Sunk_My_Battleship_minus_groupABC_Control_X9Q2",
+    "groupDEF_A4B8-Sunk_My_Battleship_minus_groupDEF_Control_X9Q2"
+  )
+
+  name_map <- plot_tools$make_display_name_map(labels)
+  name_values <- unname(as.character(name_map))
+  display_labels <- plot_tools$format_display_label(name_values)
+
+  expect_equal(name_values, labels)
+  expect_true(all(grepl("Control_X9Q2$", name_values)))
+  expect_true(all(grepl("Control X9Q2", display_labels)))
+  expect_false(any(grepl("minus group(ABC|DEF)$", display_labels)))
+})
+
+test_that("display name map preserves common control denominators", {
+  labels <- c(
+    "groupABC_minus_groupControl_X9Q2",
+    "groupDEF_minus_groupControl_X9Q2"
+  )
+
+  name_map <- plot_tools$make_display_name_map(labels)
+  name_values <- unname(as.character(name_map))
+
+  expect_equal(name_values, labels)
+  expect_true(all(grepl("groupControl_X9Q2$", name_values)))
+})
+
+test_that("display name map still shortens shared leading context", {
+  labels <- c(
+    "RUN_C3D9_Definitely_Not_Final_groupABC_A4B8-Sunk_My_Battleship_minus_groupABC_Control_X9Q2",
+    "RUN_C3D9_Definitely_Not_Final_groupDEF_A4B8-Sunk_My_Battleship_minus_groupDEF_Control_X9Q2"
+  )
+
+  name_map <- plot_tools$make_display_name_map(labels)
+  name_values <- unname(as.character(name_map))
+
+  expect_equal(
+    name_values,
+    c(
+      "groupABC_A4B8-Sunk_My_Battleship_minus_groupABC_Control_X9Q2",
+      "groupDEF_A4B8-Sunk_My_Battleship_minus_groupDEF_Control_X9Q2"
+    )
+  )
+  expect_true(all(grepl("Control_X9Q2$", name_values)))
 })
 
 test_that("faceted barplots disable strip clipping and keep strip padding", {

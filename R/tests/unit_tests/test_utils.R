@@ -77,6 +77,85 @@ testthat::test_that("process_cut_by treats NA as NULL", {
   testthat::expect_null(util_tools$process_cut_by(FALSE, cdesc))
 })
 
+testthat::test_that("make_name_map preserves common suffixes by default", {
+  labels <- c(
+    "groupABC_A4B8-Sunk_My_Battleship_minus_groupABC_Control_X9Q2",
+    "groupDEF_A4B8-Sunk_My_Battleship_minus_groupDEF_Control_X9Q2"
+  )
+
+  name_map <- util_tools$make_name_map(labels, delim = "[._\\s]")
+
+  testthat::expect_equal(unname(as.character(name_map)), labels)
+  testthat::expect_equal(attr(name_map, "removed_suffix"), "")
+})
+
+testthat::test_that("make_name_map still removes common prefixes", {
+  labels <- c(
+    "RUN_C3D9-Definitely_Not_Final_groupABC_A4B8-Sunk_My_Battleship_minus_groupABC_Control_X9Q2",
+    "RUN_C3D9-Definitely_Not_Final_groupDEF_A4B8-Sunk_My_Battleship_minus_groupDEF_Control_X9Q2"
+  )
+
+  name_map <- util_tools$make_name_map(labels, delim = "[._\\s]")
+
+  testthat::expect_equal(
+    unname(as.character(name_map)),
+    c(
+      "groupABC_A4B8-Sunk_My_Battleship_minus_groupABC_Control_X9Q2",
+      "groupDEF_A4B8-Sunk_My_Battleship_minus_groupDEF_Control_X9Q2"
+    )
+  )
+  testthat::expect_equal(attr(name_map, "removed_prefix"), "RUN_C3D9-Definitely_Not_Final_")
+  testthat::expect_equal(attr(name_map, "removed_suffix"), "")
+})
+
+testthat::test_that("make_name_map suffix stripping is explicit opt-in", {
+  labels <- c("groupA_vs_control", "groupB_vs_control")
+
+  default_map <- util_tools$make_name_map(labels, delim = "[._\\s]")
+  suffix_map <- util_tools$make_name_map(labels, delim = "[._\\s]", strip_suffix = TRUE)
+
+  testthat::expect_equal(unname(as.character(default_map)), labels)
+  testthat::expect_equal(unname(as.character(suffix_map)), c("groupA", "groupB"))
+  testthat::expect_equal(attr(suffix_map, "removed_suffix"), "_vs_control")
+})
+
+testthat::test_that("safe_filename normalizes troublesome label characters", {
+  labels <- c(
+    "A4B8-Sunk_My_Battleship",
+    "A4B8-Sunk My Battleship",
+    "A4B8-Sunk.My.Battleship",
+    "A4B8-Sunk(My)Battleship",
+    "A4B8-Sunk+My+Battleship",
+    "RUN_C3D9-Definitely_Not_Final",
+    "BATCH_X9Q2-Hotdog_Is_A_Sandwich",
+    "GROUP_A4B8-Sunk__My__Battleship",
+    "GROUP_A4B8-_Leading_Underscore-ish",
+    "GROUP_A4B8-Trailing_Dash-",
+    "GROUP_A4B8-Multiple---Dashes",
+    "GROUP_A4B8-Bjork_Gudmundsdottir",
+    "GROUP_A4B8-Cafe_Munchen",
+    "GROUP_A4B8-Space At The Function",
+    "GROUP_A4B8-Final_FINAL_v2_REALLY_FINAL"
+  )
+
+  sanitized <- stats::setNames(
+    vapply(labels, util_tools$safe_filename, character(1), fallback = "label"),
+    labels
+  )
+
+  testthat::expect_true(all(nzchar(sanitized)))
+  testthat::expect_false(any(grepl("[[:space:]()+]", sanitized)))
+  testthat::expect_equal(sanitized[["A4B8-Sunk My Battleship"]], "A4B8-Sunk_My_Battleship")
+  testthat::expect_equal(sanitized[["A4B8-Sunk.My.Battleship"]], "A4B8-Sunk.My.Battleship")
+  testthat::expect_equal(sanitized[["A4B8-Sunk(My)Battleship"]], "A4B8-Sunk_My_Battleship")
+  testthat::expect_equal(sanitized[["A4B8-Sunk+My+Battleship"]], "A4B8-Sunk_My_Battleship")
+  testthat::expect_equal(sanitized[["GROUP_A4B8-Space At The Function"]], "GROUP_A4B8-Space_At_The_Function")
+  testthat::expect_equal(
+    sanitized[["GROUP_A4B8-Final_FINAL_v2_REALLY_FINAL"]],
+    "GROUP_A4B8-Final_FINAL_v2_REALLY_FINAL"
+  )
+})
+
 testthat::test_that("clean_args normalizes numeric do flags", {
   params <- list(
     savedir = "plots",
@@ -125,6 +204,22 @@ testthat::test_that("clean_args defaults enplot toggles to TRUE and honors enplo
   )
   testthat::expect_true(isTRUE(cleaned_override$enplot$do_individual))
   testthat::expect_false(isTRUE(cleaned_override$enplot$do_combined))
+})
+
+testthat::test_that("clean_args resolves savedir logfile sentinel", {
+  root_dir <- tempdir()
+  params <- list(
+    savedir = "plots",
+    advanced = list(logfile = "savedir"),
+    genesets = list(list(category = "H", subcategory = "", collapse = FALSE))
+  )
+
+  cleaned <- util_tools$clean_args(params, root_dir = root_dir)
+
+  testthat::expect_equal(
+    cleaned$advanced$logfile,
+    file.path(root_dir, "plots", "run.log")
+  )
 })
 
 # logging

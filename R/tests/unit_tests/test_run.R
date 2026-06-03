@@ -42,6 +42,57 @@ trycatch <- function(expr, silent = TRUE) {
   })
 }
 
+testthat::test_that("enplot combine specs preserve facet labels while ordering by rankname", {
+  metadata <- data.frame(
+    id = c("rank_b", "rank_a", "rank_c"),
+    group = c("G2", "G1", "G2"),
+    stringsAsFactors = FALSE
+  )
+  rownames(metadata) <- metadata$id
+
+  process_cut_by_fn <- function(cut_by, cdesc) {
+    interaction(cdesc[, cut_by, drop = FALSE], drop = TRUE)
+  }
+
+  specs <- run_env$make_enplot_combine_specs(
+    combine_by = "group",
+    metadata = metadata,
+    rankname_order = c("rank_a", "rank_b", "rank_c"),
+    process_cut_by_fn = process_cut_by_fn
+  )
+
+  testthat::expect_equal(length(specs), 1)
+  testthat::expect_equal(specs[[1]]$name, "group")
+  testthat::expect_equal(specs[[1]]$combine_by$rankname, c("rank_a", "rank_b", "rank_c"))
+  testthat::expect_equal(as.character(specs[[1]]$combine_by$facet), c("G1", "G2", "G2"))
+  testthat::expect_false(any(is.na(specs[[1]]$combine_by$facet)))
+  testthat::expect_equal(levels(specs[[1]]$combine_by$facet), c("G1", "G2"))
+})
+
+testthat::test_that("enplot combine specs return an all-route when combine_by is empty or invalid", {
+  metadata <- data.frame(id = c("rank_a", "rank_b"), group = c("G1", "G2"))
+  rownames(metadata) <- metadata$id
+  null_process_cut_by <- function(cut_by, cdesc) NULL
+
+  empty_spec <- run_env$make_enplot_combine_specs(
+    combine_by = FALSE,
+    metadata = metadata,
+    rankname_order = rownames(metadata),
+    process_cut_by_fn = null_process_cut_by
+  )
+  invalid_spec <- run_env$make_enplot_combine_specs(
+    combine_by = "missing_column",
+    metadata = metadata,
+    rankname_order = rownames(metadata),
+    process_cut_by_fn = null_process_cut_by
+  )
+
+  testthat::expect_equal(empty_spec[[1]]$name, "all")
+  testthat::expect_null(empty_spec[[1]]$combine_by)
+  testthat::expect_equal(invalid_spec[[1]]$name, "all")
+  testthat::expect_null(invalid_spec[[1]]$combine_by)
+})
+
 
 
 setup <- function(data_dir, output_dir, gct_path) {
@@ -148,6 +199,53 @@ testthat::test_that("test main function with valid parameters", {
       print("Function is being called")
       run_env$run(params)
     })
+  }, fgsea = fgsea_test_fake_fgsea, .package = "fgsea")
+})
+
+testthat::test_that("sample_exclude is applied before table export", {
+  testthat::with_mocked_bindings({
+    root_dir <- fs::path(tempdir(), sprintf("tackle2-run-exclude-%s-%04d",
+      format(Sys.time(), "%Y%m%d%H%M%S"),
+      sample.int(9999, 1)
+    ))
+    fs::dir_create(root_dir, recurse = TRUE)
+    defer(fs::dir_delete(root_dir), envir = parent.frame())
+
+    data_dir <- fs::path(root_dir, "data")
+    output_dir <- fs::path(root_dir, "output")
+    fs::dir_create(data_dir, recurse = TRUE)
+    fs::dir_create(output_dir, recurse = TRUE)
+    test_gct_path <- fs::path(data_dir, "test.gct")
+    setup(data_dir, output_dir, test_gct_path)
+
+    params <- list(
+      rankfiledir = data_dir,
+      volcanodir = data_dir,
+      savedir = output_dir,
+      gct_path = test_gct_path,
+      ranks_from = "volcano",
+      sample_exclude = c("group_A_vs_B_dirB_1"),
+      advanced = list(
+        cache = FALSE,
+        quiet = TRUE,
+        parallel = FALSE,
+        replace = TRUE,
+        cachedir = fs::path(output_dir, "cache"),
+        logfile = fs::path(output_dir, "run.log")
+      ),
+      barplot = list(do_individual = FALSE, do_combined = FALSE),
+      heatmap_gsea = list(do = FALSE),
+      heatmap_gene = list(do = FALSE),
+      enplot = list(do_individual = FALSE, do_combined = FALSE),
+      pca = list(do = FALSE),
+      genesets = list(
+        list(category = "H", subcategory = "", collapse = FALSE)
+      )
+    )
+
+    testthat::expect_no_error(run_env$run(params))
+    exported <- fs::dir_ls(fs::path(output_dir, "gsea_tables"), glob = "*.tsv")
+    testthat::expect_equal(length(exported), 8)
   }, fgsea = fgsea_test_fake_fgsea, .package = "fgsea")
 })
 

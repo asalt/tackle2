@@ -293,6 +293,60 @@ finalize_rank_inputs <- function(
   )
 }
 
+rank_context_label <- function(rank_name) {
+  if (is.null(rank_name) || length(rank_name) == 0) {
+    return("unnamed rank")
+  }
+  rank_name <- as.character(rank_name[[1]])
+  if (is.na(rank_name) || !nzchar(rank_name)) {
+    return("unnamed rank")
+  }
+  rank_name
+}
+
+prepare_rank_df <- function(rank_df, rank_name = NULL, warn = TRUE) {
+  label <- rank_context_label(rank_name)
+  if (!is.data.frame(rank_df)) {
+    stop("rank input must be a data.frame")
+  }
+
+  if ("GeneID" %in% colnames(rank_df) && !"id" %in% colnames(rank_df)) {
+    rank_df$id <- rank_df$GeneID
+  }
+  if (!all(c("id", "value") %in% colnames(rank_df))) {
+    stop("rank input must contain id and value columns")
+  }
+
+  out <- data.frame(
+    id = trimws(as.character(rank_df$id)),
+    value = suppressWarnings(as.numeric(rank_df$value)),
+    stringsAsFactors = FALSE
+  )
+
+  valid <- !is.na(out$id) & nzchar(out$id) & is.finite(out$value)
+  dropped_invalid <- sum(!valid)
+  if (dropped_invalid > 0 && warn) {
+    log_msg(warning = paste0(
+      "rank ", label, ": dropping ", dropped_invalid,
+      " row(s) with missing ids or non-finite values"
+    ))
+  }
+  out <- out[valid, , drop = FALSE]
+  if (nrow(out) == 0) {
+    if (warn) log_msg(warning = paste0("rank ", label, ": no usable rows remain"))
+    return(out)
+  }
+
+  duplicate_rows <- duplicated(out$id)
+  if (any(duplicate_rows) && warn) {
+    log_msg(warning = paste0(
+      "rank ", label, ": dropping ", sum(duplicate_rows),
+      " duplicate gene id row(s); keeping first occurrence"
+    ))
+  }
+  out[!duplicate_rows, , drop = FALSE]
+}
+
 make_random_gct <- function(nrow = 10, ncol = 4) {
   set.seed(369)
   nrow <- max(nrow, 1)
@@ -446,9 +500,12 @@ write_rnkfiles <- function(
         c(dir, paste0(.y, ".rnk"))
       )
       if (!fs::file_exists(.outname)) {
-        if (("GeneID" %in% colnames(.x)) && (!"id" %in% colnames(.x))) .x %<>% dplyr::rename(id = GeneID)
-        .x %>%
-          dplyr::select(id, value) %>%
+        rank_df <- prepare_rank_df(.x, rank_name = .y)
+        if (nrow(rank_df) == 0) {
+          log_msg(warning = paste0("rank ", .y, ": skipping empty rank file write"))
+          return(invisible(NULL))
+        }
+        rank_df %>%
           write_tsv(.outname, col_names = FALSE)
         log_msg(msg = paste0("Wrote ", .outname))
       }
@@ -475,8 +532,11 @@ ranks_dfs_to_lists <- function(rnkdfs) {
 
   if (!"list" %in% class(rnkdfs)) rnkdfs <- list(rnkdfs)
 
-  ranks_list <- rnkdfs %>% purrr::map(
-    ~ with(.x, setNames(value, id))
+  ranks_list <- rnkdfs %>% purrr::imap(
+    ~ {
+      rank_df <- prepare_rank_df(.x, rank_name = .y)
+      stats::setNames(rank_df$value, rank_df$id)
+    }
   )
   return(ranks_list)
 }
