@@ -38,3 +38,5 @@ R/savedir
 run_cache/
 run_files/
 R/tests/integration_tests/test_output/
+.codex-session
+.codex-session.json
