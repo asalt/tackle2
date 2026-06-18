@@ -1952,7 +1952,9 @@ plot_top_ES <- function(
   df %<>% fgsea_tools$select_topn(limit = limit)
 
   if (!is.null(xtra)){
-      df %<>% dplyr::bind_rows(xtra)
+      df %<>%
+        dplyr::bind_rows(xtra) %>%
+        dplyr::distinct(.data$pathway, .data$rankname, .keep_all = TRUE)
   }
 
   if (nrow(df) == 0) {
@@ -2193,7 +2195,7 @@ plotES <- function(enplot_data, ticksSize = 4, title = "", subtitle = "") {
           x = rank, y = -spreadES / 16,
           xend = rank, yend = spreadES / 16
         ),
-        size = 0.2
+        linewidth = 0.2
       ) +
       geom_hline(yintercept = posES, colour = "red", linetype = "dashed") +
       geom_hline(yintercept = negES, colour = "red", linetype = "dashed") +

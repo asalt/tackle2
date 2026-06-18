@@ -811,11 +811,12 @@ get_rankorder_across <- function(
     head(n = limit)
 
   if (!is.null(xtra)){
-    df <- bind_rows(df, distinct(xtra, .keep_all = TRUE))
+    df <- bind_rows(df, distinct(xtra, .keep_all = TRUE)) %>%
+      distinct(pathway, rankname, .keep_all = TRUE)
   }
 
 
-  pathways_to_plot <- df$pathway
+  pathways_to_plot <- unique(df$pathway)
   rank_ids <- names(ranks_list)
 
   # if (!is.null(db)) {

@@ -58,6 +58,43 @@ test_that("enrichplot combined and individual directories share the same pathway
   testthat::expect_match(combined_dir, "^enrichplots_PATHOGEN_HTLV_1_TAX_TO_SPINDLE_ASSEMBLY")
 })
 
+test_that("enrichplot limit zero still plots pathways of interest", {
+  ranks_list <- list(
+    sample_A = stats::setNames(c(3, 2, 1, -1, -2, -3), paste0("gene", 1:6)),
+    sample_B = stats::setNames(c(-3, -2, -1, 1, 2, 3), paste0("gene", 1:6))
+  )
+  geneset_collection <- list(
+    TOP_PATHWAY = c("gene1", "gene2"),
+    POI_PATHWAY = c("gene5", "gene6")
+  )
+  df <- tidyr::expand_grid(
+    pathway = names(geneset_collection),
+    rankname = names(ranks_list)
+  ) %>%
+    dplyr::mutate(
+      pval = 0.01,
+      padj = 0.02,
+      ES = dplyr::if_else(.data$pathway == "TOP_PATHWAY", 0.8, 0.2),
+      NES = dplyr::if_else(.data$pathway == "TOP_PATHWAY", 3.0, 0.2),
+      size = 2L,
+      mainpathway = .data$pathway == "TOP_PATHWAY"
+    )
+
+  plts <- plot_tools$plot_top_ES(
+    df = df,
+    ranks_list = ranks_list,
+    geneset_collection = geneset_collection,
+    limit = 0,
+    do_individual = TRUE,
+    do_combined = FALSE,
+    pathways_of_interest = "POI_PATHWAY"
+  )
+
+  testthat::expect_equal(names(plts), "POI_PATHWAY")
+  testthat::expect_equal(names(plts$POI_PATHWAY), names(ranks_list))
+  testthat::expect_true(all(vapply(plts$POI_PATHWAY, inherits, logical(1), "ggplot")))
+})
+
 
 test_that("test plot a single barplot", {
   plt <- TEST_DATA$H_[[1]] %>%
