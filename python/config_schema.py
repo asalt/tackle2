@@ -315,7 +315,7 @@ class ExtraConfig(ConfigSection):
 def _default_genesets() -> List[Dict[str, Any]]:
     return [
         {"category": "H", "subcategory": "", "collapse": False},
-        {"category": "C2", "subcategory": "CP:KEGG", "collapse": True},
+        {"category": "C2", "subcategory": "CP:KEGG_MEDICUS", "collapse": True},
         {"category": "C2", "subcategory": "CP:REACTOME", "collapse": True},
         {"category": "C3", "subcategory": "TFT:GTRD", "collapse": True},
         {"category": "C3", "subcategory": "MIR:MIRDB", "collapse": True},
