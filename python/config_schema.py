@@ -164,6 +164,10 @@ class TopNSettings(ConfigSection):
         "limit": FieldMeta(List[int], lambda: [12, 20, 32], "Top-N sizes to plot."),
         "do_individual": FieldMeta(bool, True, "Render per-comparison plots."),
         "do_combined": FieldMeta(bool, True, "Render combined plots."),
+        "pstat_cutoff": FieldMeta(float, 1.0, "P-value or adjusted P-value cutoff before top-N selection."),
+        "pstat_usetype": FieldMeta(str, "padj", "Statistic used for pstat_cutoff.", choices=("padj", "pval")),
+        "sort_by": FieldMeta(str, "NES", "Statistic used to rank pathways before top-N selection.", choices=("NES", "pval", "padj")),
+        "variants": FieldMeta(List[Dict[str, Any]], list, "Optional extra selector variants; each entry can override name, label, pstat_cutoff, pstat_usetype, and sort_by."),
     }
 
 

@@ -23,6 +23,138 @@ normalize_bool <- function(x, default = FALSE) {
   default
 }
 
+scalar_or_default <- function(x, default = NULL) {
+  if (is.null(x) || length(x) == 0) {
+    return(default)
+  }
+  if (is.list(x)) {
+    x <- x[[1]]
+  } else {
+    x <- x[1]
+  }
+  if (length(x) == 0 || is.null(x)) {
+    return(default)
+  }
+  x
+}
+
+normalize_plot_pstat_cutoff <- function(x, default = 1) {
+  x <- scalar_or_default(x, default)
+  x <- suppressWarnings(as.numeric(x)[1])
+  if (is.na(x)) {
+    return(default)
+  }
+  x
+}
+
+normalize_plot_pstat_usetype <- function(x, default = "padj") {
+  x <- scalar_or_default(x, default)
+  x <- trimws(tolower(as.character(x)[1]))
+  if (!nzchar(x) || is.na(x)) {
+    x <- default
+  }
+  if (x %in% c("padj", "fdr", "q", "qval", "adjp", "adjusted_p", "adjusted_pvalue", "adjusted_p_value")) {
+    return("padj")
+  }
+  if (x %in% c("pval", "p", "pvalue", "p_value")) {
+    return("pval")
+  }
+  stop("pstat_usetype must be one of padj/fdr or pval")
+}
+
+normalize_plot_sort_by <- function(x, default = "NES") {
+  x <- scalar_or_default(x, default)
+  x <- trimws(as.character(x)[1])
+  if (!nzchar(x) || is.na(x)) {
+    x <- default
+  }
+  x_lower <- tolower(x)
+  if (x_lower == "nes") {
+    return("NES")
+  }
+  if (x_lower %in% c("pval", "p", "pvalue", "p_value")) {
+    return("pval")
+  }
+  if (x_lower %in% c("padj", "fdr", "q", "qval", "adjp", "adjusted_p", "adjusted_pvalue", "adjusted_p_value")) {
+    return("padj")
+  }
+  stop("sort_by must be one of NES, pval, or padj")
+}
+
+default_selection_variant_name <- function(pstat_cutoff, pstat_usetype, sort_by, index = 1L) {
+  parts <- character(0)
+  if (!is.na(pstat_cutoff) && pstat_cutoff < 1) {
+    stat_part <- if (identical(pstat_usetype, "padj")) "fdr" else pstat_usetype
+    cutoff_part <- gsub("\\.", "p", format(pstat_cutoff, trim = TRUE, scientific = FALSE))
+    parts <- c(parts, paste0(stat_part, cutoff_part))
+  }
+  if (!identical(sort_by, "NES")) {
+    parts <- c(parts, paste0("by_", tolower(sort_by)))
+  }
+  if (length(parts) == 0) {
+    return(paste0("variant", index))
+  }
+  paste(parts, collapse = "_")
+}
+
+normalize_plot_selection_variants <- function(plot_params) {
+  plot_params <- plot_params %||% list()
+  base <- list(
+    name = "",
+    label = NULL,
+    pstat_cutoff = normalize_plot_pstat_cutoff(plot_params$pstat_cutoff, default = 1),
+    pstat_usetype = normalize_plot_pstat_usetype(plot_params$pstat_usetype %||% "padj"),
+    sort_by = normalize_plot_sort_by(plot_params$sort_by %||% "NES")
+  )
+
+  variants_raw <- plot_params$variants %||% list()
+  if (is.data.frame(variants_raw)) {
+    variants_raw <- split(variants_raw, seq_len(nrow(variants_raw)))
+  }
+  if (!is.list(variants_raw)) {
+    variants_raw <- list(variants_raw)
+  }
+  if (length(variants_raw) > 0 && !is.null(names(variants_raw)) &&
+      any(names(variants_raw) %in% c("name", "label", "pstat_cutoff", "pstat_usetype", "sort_by"))) {
+    variants_raw <- list(variants_raw)
+  }
+
+  variants <- list(base)
+  extra_names <- character(0)
+  for (idx in seq_along(variants_raw)) {
+    candidate <- variants_raw[[idx]]
+    if (!is.list(candidate)) {
+      next
+    }
+    variant <- base
+    variant$pstat_cutoff <- normalize_plot_pstat_cutoff(candidate$pstat_cutoff %||% base$pstat_cutoff, default = base$pstat_cutoff)
+    variant$pstat_usetype <- normalize_plot_pstat_usetype(candidate$pstat_usetype %||% base$pstat_usetype)
+    variant$sort_by <- normalize_plot_sort_by(candidate$sort_by %||% base$sort_by)
+    variant$label <- scalar_or_default(candidate$label, NULL)
+    variant$name <- scalar_or_default(candidate$name, NULL)
+    if (is.null(variant$name) || is.na(variant$name) || !nzchar(as.character(variant$name))) {
+      variant$name <- default_selection_variant_name(
+        variant$pstat_cutoff,
+        variant$pstat_usetype,
+        variant$sort_by,
+        index = idx
+      )
+    }
+    variant$name <- as.character(variant$name)
+    extra_names <- c(extra_names, variant$name)
+    variants[[length(variants) + 1]] <- variant
+  }
+
+  if (length(extra_names) > 0) {
+    unique_names <- make.unique(extra_names, sep = "_")
+    for (idx in seq_along(unique_names)) {
+      variants[[idx + 1]]$name <- unique_names[[idx]]
+    }
+  }
+
+  variants
+}
+
 is_quiet <- function(default = FALSE) {
   normalize_bool(getOption(pkg_option_name("quiet"), default), default = default)
 }
@@ -129,6 +261,14 @@ clean_args <- function(params, root_dir = "/") {
   default_limit_values <- c(10, 20, 30, 50)
   params$barplot$limit <- normalize_limit_vector(params$barplot$limit, default_limit_values)
   params$bubbleplot$limit <- normalize_limit_vector(params$bubbleplot$limit, params$barplot$limit)
+  params$barplot$pstat_cutoff <- normalize_plot_pstat_cutoff(params$barplot$pstat_cutoff, default = 1)
+  params$barplot$pstat_usetype <- normalize_plot_pstat_usetype(params$barplot$pstat_usetype %||% "padj")
+  params$barplot$sort_by <- normalize_plot_sort_by(params$barplot$sort_by %||% "NES")
+  params$barplot$variants <- params$barplot$variants %||% list()
+  params$bubbleplot$pstat_cutoff <- normalize_plot_pstat_cutoff(params$bubbleplot$pstat_cutoff, default = params$barplot$pstat_cutoff)
+  params$bubbleplot$pstat_usetype <- normalize_plot_pstat_usetype(params$bubbleplot$pstat_usetype %||% params$barplot$pstat_usetype)
+  params$bubbleplot$sort_by <- normalize_plot_sort_by(params$bubbleplot$sort_by %||% params$barplot$sort_by)
+  params$bubbleplot$variants <- params$bubbleplot$variants %||% list()
   params$bubbleplot$glyph <- params$bubbleplot$glyph %||% "⁕"
 
   params$heatmap_gsea$do <- normalize_bool(params$heatmap_gsea$do, default = TRUE)

@@ -246,7 +246,16 @@ do_individual = true
 do_combined = true
 ```
 
-The limit vector controls how many pathways are shown per figure; the `do_*` toggles mirror the barplot configuration.
+The limit vector controls how many pathways are shown per figure; the `do_*` toggles mirror the barplot configuration. Barplots and bubble plots also support opt-in selector variants that write separate suffixed files:
+
+```
+[[params.bubbleplot.variants]]
+name = "fdr25_pval"
+label = "FDR < 0.25, ranked by pval"
+pstat_cutoff = 0.25
+pstat_usetype = "padj"
+sort_by = "pval"
+```
 
 
 ## Citations

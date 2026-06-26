@@ -114,6 +114,29 @@ test_that("rank vector sanitizer removes unusable stats deterministically", {
   expect_true(any(grepl("duplicate gene id", warnings)))
 })
 
+test_that("select_topn can rank by p-value and filter by FDR", {
+  df <- tibble::tibble(
+    pathway = c("HIGH_NES_BAD_P", "LOW_NES_GOOD_P", "MID_NES_OK_P"),
+    NES = c(5, 1, 2),
+    pval = c(0.90, 0.001, 0.02),
+    padj = c(0.90, 0.20, 0.30)
+  )
+
+  by_nes <- fgsea_tools$select_topn(df, limit = 1, pstat_cutoff = 1, sort_by = "NES")
+  by_pval <- fgsea_tools$select_topn(df, limit = 1, pstat_cutoff = 1, sort_by = "pvalue")
+  fdr_filtered <- fgsea_tools$select_topn(
+    df,
+    limit = 10,
+    pstat_cutoff = 0.25,
+    pstat_usetype = "fdr",
+    sort_by = "pval"
+  )
+
+  expect_equal(by_nes$pathway, "HIGH_NES_BAD_P")
+  expect_equal(by_pval$pathway, "LOW_NES_GOOD_P")
+  expect_equal(fdr_filtered$pathway, "LOW_NES_GOOD_P")
+})
+
 test_that("run_all_rankobjs warns when ranks produce no fgsea result", {
   fgsea_tools_missing <- new.env()
   source(file.path(src_dir, "./fgsea.R"), local = fgsea_tools_missing)

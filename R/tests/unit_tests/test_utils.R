@@ -181,6 +181,27 @@ testthat::test_that("clean_args normalizes numeric do flags", {
   testthat::expect_false(isTRUE(cleaned$enplot$do_combined))
 })
 
+testthat::test_that("plot selection variants keep default and suffix extra variants", {
+  variants <- util_tools$normalize_plot_selection_variants(list(
+    pstat_cutoff = 1,
+    pstat_usetype = "fdr",
+    sort_by = "nes",
+    variants = list(
+      list(name = "fdr25", pstat_cutoff = 0.25),
+      list(sort_by = "pvalue")
+    )
+  ))
+
+  testthat::expect_equal(length(variants), 3)
+  testthat::expect_equal(variants[[1]]$name, "")
+  testthat::expect_equal(variants[[1]]$pstat_usetype, "padj")
+  testthat::expect_equal(variants[[1]]$sort_by, "NES")
+  testthat::expect_equal(variants[[2]]$name, "fdr25")
+  testthat::expect_equal(variants[[2]]$pstat_cutoff, 0.25)
+  testthat::expect_equal(variants[[3]]$name, "by_pval")
+  testthat::expect_equal(variants[[3]]$sort_by, "pval")
+})
+
 testthat::test_that("clean_args defaults enplot toggles to TRUE and honors enplot.do fallback", {
   base_params <- list(
     savedir = "plots",

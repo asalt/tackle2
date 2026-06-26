@@ -15,6 +15,10 @@ cut_by = "group"
 limit = [12, 20, 32]
 do_individual = true
 do_combined = true
+pstat_cutoff = 1.0
+pstat_usetype = "padj"
+sort_by = "NES"
+variants = []
   [params.barplot.advanced]
   stroke_width = 1.0
 
@@ -22,6 +26,10 @@ do_combined = true
 limit = [12, 20, 32]
 do_individual = true
 do_combined = true
+pstat_cutoff = 1.0
+pstat_usetype = "padj"
+sort_by = "NES"
+variants = []
 glyph = "⁕"
   [params.bubbleplot.advanced]
   stroke_width = 0.8

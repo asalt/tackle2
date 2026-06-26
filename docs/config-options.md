@@ -13,8 +13,10 @@ $ tackle2 describe params.bubbleplot --json
 [params]
 [params.barplot]
 [params.barplot.advanced]
+[params.barplot.variants]
 [params.bubbleplot]
 [params.bubbleplot.advanced]
+[params.bubbleplot.variants]
 [params.enplot]
 [params.heatmap_gsea]
 [params.heatmap_gene]
@@ -56,6 +58,10 @@ Generated limma summaries and volcano PDFs are stored under `savedir/model/<type
 - `limit` (array of ints, default `[12,20,32]`): `top N` sizes to plot individually/combined.
 - `do_individual` (bool, default `true`): Render barplots per comparison.
 - `do_combined` (bool, default `true`): Render aggregated barplots.
+- `pstat_cutoff` (float, default `1.0`): P-value or adjusted P-value cutoff applied before top-N selection.
+- `pstat_usetype` (string, default `"padj"`): Statistic used for `pstat_cutoff` (`"padj"`/FDR or `"pval"`).
+- `sort_by` (string, default `"NES"`): Statistic used to rank pathways before top-N selection (`"NES"`, `"pval"`, or `"padj"`).
+- `variants` (array of tables, default `[]`): Optional extra selector variants. Each entry can set `name`, `label`, `pstat_cutoff`, `pstat_usetype`, and `sort_by`; named variants write separate suffixed files.
 
 ### params.barplot.advanced
 
@@ -66,7 +72,22 @@ Generated limma summaries and volcano PDFs are stored under `savedir/model/<type
 - `limit` (array of ints, default `[12,20,32]`): `top N` sizes for bubble plots.
 - `do_individual` (bool, default `true`): Render per-comparison bubbles.
 - `do_combined` (bool, default `true`): Render combined bubbles per gene set.
+- `pstat_cutoff` (float, default `1.0`): P-value or adjusted P-value cutoff applied before top-N selection.
+- `pstat_usetype` (string, default `"padj"`): Statistic used for `pstat_cutoff` (`"padj"`/FDR or `"pval"`).
+- `sort_by` (string, default `"NES"`): Statistic used to rank pathways before top-N selection (`"NES"`, `"pval"`, or `"padj"`).
+- `variants` (array of tables, default `[]`): Optional extra selector variants. Each entry can set `name`, `label`, `pstat_cutoff`, `pstat_usetype`, and `sort_by`; named variants write separate suffixed files.
 - `glyph` (string, default `"⁕"`): Symbol for `padj < 0.05` markers.
+
+Example variant:
+
+```toml
+[[params.bubbleplot.variants]]
+name = "fdr25_pval"
+label = "FDR < 0.25, ranked by pval"
+pstat_cutoff = 0.25
+pstat_usetype = "padj"
+sort_by = "pval"
+```
 
 ### params.bubbleplot.advanced
 

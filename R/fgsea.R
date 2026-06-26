@@ -172,7 +172,7 @@ add_pathway_shape_metrics <- function(fgsea_res, rankobj) {
 #'
 #' This function selects the top pathways from a data frame based on a statistical cutoff.
 #' The statistical cutoff is determined by the p-value or adjusted p-value, depending on the value of the `pstat_usetype` parameter.
-#' The function arranges the data frame in descending order of the absolute value of the NES column,
+#' The function arranges the data frame by absolute NES, p-value, or adjusted p-value,
 #' filters the rows where the p-value or adjusted p-value is less than the specified cutoff,
 #' selects the specified number of top pathways, and returns a subset of the data frame containing only the top pathways.
 #'
@@ -180,6 +180,7 @@ add_pathway_shape_metrics <- function(fgsea_res, rankobj) {
 #' @param pstat_cutoff The cutoff value for the p-value or adjusted p-value.
 #' @param limit The maximum number of top pathways to select.
 #' @param pstat_usetype The type of statistical value to use for the cutoff (either "pval" or "padj").
+#' @param sort_by The column used to rank pathways before applying the top-N selection ("NES", "pval", or "padj").
 #'
 #' @return A subset of the input data frame containing only the top pathways.
 #'
@@ -204,9 +205,12 @@ select_topn <- function(df,
                         pstat_cutoff = 1,
                         limit = 120,
                         pstat_usetype = c("padj", "pval"),
+                        sort_by = c("NES", "pval", "padj"),
                         to_include = NULL, # extra pathways to explictly include
                         ...) {
-  pstat_usetype <- match.arg(pstat_usetype)
+  pstat_usetype <- util_tools$normalize_plot_pstat_usetype(pstat_usetype)
+  sort_by <- util_tools$normalize_plot_sort_by(sort_by)
+  pstat_cutoff <- util_tools$normalize_plot_pstat_cutoff(pstat_cutoff, default = 1)
 
   if (!"data.frame" %in% class(df)) {
     stop(
@@ -225,9 +229,20 @@ select_topn <- function(df,
       cat(paste0(pstat_usetype, " should be a column in df"))
     )
   }
+  if (!sort_by %in% colnames(df)) {
+    stop(
+      cat(paste0(sort_by, " should be a column in df"))
+    )
+  }
 
-  top_pathways <- df %>%
-    arrange(-abs(NES)) %>%
+  ranked_df <- switch(
+    sort_by,
+    NES = df %>% arrange(dplyr::desc(abs(.data$NES))),
+    pval = df %>% arrange(.data$pval, dplyr::desc(abs(.data$NES))),
+    padj = df %>% arrange(.data$padj, dplyr::desc(abs(.data$NES)))
+  )
+
+  top_pathways <- ranked_df %>%
     distinct(pathway, .keep_all = TRUE) %>%
     filter(!!as.symbol(pstat_usetype) < pstat_cutoff) %>%
     slice_head(n = limit) %>%

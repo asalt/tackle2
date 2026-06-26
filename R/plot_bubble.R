@@ -286,13 +286,13 @@ bubble_plot <- function(
   n_pathways <- dplyr::n_distinct(sel$pathway)
   text_scale <- axis_text_y_size / 6.6
   per_row_in <- dplyr::case_when(
-    n_pathways <= 20 ~ 0.28,
-    n_pathways <= 60 ~ 0.25,
-    TRUE ~ 0.26
+    n_pathways <= 20 ~ 0.24,
+    n_pathways <= 60 ~ 0.21,
+    TRUE ~ 0.18
   ) * text_scale
-  per_row_in <- max(min(per_row_in, 0.34), 0.18)
-  min_panel_height_in <- 3.2
-  facet_strip_pad_in <- 0.35
+  per_row_in <- max(min(per_row_in, 0.30), 0.14)
+  min_panel_height_in <- 2.8
+  facet_strip_pad_in <- 0.30
   panel_height_in_calc <- max(min_panel_height_in, per_row_in * n_pathways + facet_strip_pad_in)
   total_width_in <- 2.2 + (panel_width_in * ncol)
   total_height_in <- panel_height_in_calc * nrow
@@ -327,6 +327,11 @@ all_bubble_plots <- function(
     limit = 20,
     size_range = c(3.0, 9.0),
     glyph = DEFAULT_BUBBLE_GLYPH,
+    pstat_cutoff = 1,
+    pstat_usetype = "padj",
+    sort_by = "NES",
+    variant_name = NULL,
+    variant_label = NULL,
     rank_metadata = NULL,
     ...) {
   if (!is.null(save_func)) {
@@ -341,6 +346,14 @@ all_bubble_plots <- function(
     ~ {
       collection_name <- .y
       collection_label <- format_source_label(collection_name)
+      selection_label <- plot_tools$selection_variant_label(
+        variant_name = variant_name,
+        variant_label = variant_label,
+        pstat_cutoff = pstat_cutoff,
+        pstat_usetype = pstat_usetype,
+        sort_by = sort_by
+      )
+      variant_suffix <- plot_tools$selection_variant_suffix(variant_name)
       list_of_comparisons <- .x
       # Build a friendly mapping to strip shared affixes from comparison names
       comparison_names <- names(list_of_comparisons)
@@ -352,11 +365,18 @@ all_bubble_plots <- function(
           comparison_label <- name_map[[comparison_name]] %||% comparison_name
 
           purrr::map(limit, function(.limit) {
-            sel <- fgsea_tools$select_topn(dataframe, limit = .limit, pstat_cutoff = 1)
+            sel <- fgsea_tools$select_topn(
+              dataframe,
+              limit = .limit,
+              pstat_cutoff = pstat_cutoff,
+              pstat_usetype = pstat_usetype,
+              sort_by = sort_by
+            )
             log_msg(msg = paste0(
               "bubble all: collection=", collection_name,
               " comparison=", comparison_name,
               " limit=", .limit,
+              if (nzchar(variant_suffix)) paste0(" variant=", variant_suffix) else "",
               " selected_rows=", nrow(sel)
             ))
             if (nrow(sel) == 0) {
@@ -380,6 +400,7 @@ all_bubble_plots <- function(
                 "bubble",
                 paste0("top", effective_limit),
                 paste0("n", n_pathways),
+                variant_suffix,
                 fallback = "bubble"
               )
               save_path <- util_tools$safe_subdir(
@@ -396,7 +417,10 @@ all_bubble_plots <- function(
 
             rank_label <- comparison_label %||% comparison_name
             base_subtitle <- paste0("rank: ", rank_label, " • top ", effective_limit)
-            subtitle_text <- paste0(base_subtitle, " • source: ", collection_label)
+            subtitle_text <- paste(
+              c(base_subtitle, selection_label, paste0("source: ", collection_label)),
+              collapse = " • "
+            )
 
             bubble_plot(
               sel,
@@ -425,9 +449,22 @@ do_combined_bubble_plots <- function(
     limit = 20,
     size_range = c(3.0, 9.0),
     glyph = DEFAULT_BUBBLE_GLYPH,
+    pstat_cutoff = 1,
+    pstat_usetype = "padj",
+    sort_by = "NES",
+    variant_name = NULL,
+    variant_label = NULL,
     rank_metadata = NULL,
     ...) {
   genesets <- names(results_list)
+  selection_label <- plot_tools$selection_variant_label(
+    variant_name = variant_name,
+    variant_label = variant_label,
+    pstat_cutoff = pstat_cutoff,
+    pstat_usetype = pstat_usetype,
+    sort_by = sort_by
+  )
+  variant_suffix <- plot_tools$selection_variant_suffix(variant_name)
 
   purrr::map(genesets, function(geneset_name) {
     fgsea_res_list <- results_list[[geneset_name]]
@@ -435,7 +472,13 @@ do_combined_bubble_plots <- function(
 
     purrr::map(limit, function(.limit) {
       res <- fgsea_res_list %>% bind_rows(.id = "rankname")
-      res <- fgsea_tools$select_topn(res, limit = .limit, pstat_cutoff = 1)
+      res <- fgsea_tools$select_topn(
+        res,
+        limit = .limit,
+        pstat_cutoff = pstat_cutoff,
+        pstat_usetype = pstat_usetype,
+        sort_by = sort_by
+      )
       n_sel <- res %>% distinct(pathway) %>% nrow()
       effective_limit <- min(.limit, n_sel)
       if (n_sel == 0) {
@@ -448,6 +491,7 @@ do_combined_bubble_plots <- function(
       log_msg(msg = paste0(
         "bubble combined: geneset=", geneset_name,
         " limit=", .limit,
+        if (nzchar(variant_suffix)) paste0(" variant=", variant_suffix) else "",
         " selected_rows=", nrow(res),
         " distinct_pathways=", n_sel
       ))
@@ -461,6 +505,7 @@ do_combined_bubble_plots <- function(
           "bubble",
           paste0("top", effective_limit),
           paste0("n", n_sel),
+          variant_suffix,
           "all",
           fallback = "bubble_all"
         )
@@ -474,7 +519,10 @@ do_combined_bubble_plots <- function(
       bubble_plot(
         res,
         title = geneset_name,
-        subtitle = paste0("top ", effective_limit, " pathways • source: ", collection_label),
+        subtitle = paste(
+          c(paste0("top ", effective_limit, " pathways"), selection_label, paste0("source: ", collection_label)),
+          collapse = " • "
+        ),
         save_func = local_save_func,
         facet_order = facet_order,
         nes_range = nes_range,

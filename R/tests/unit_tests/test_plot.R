@@ -18,6 +18,9 @@ source(file.path(src_dir, "./geneset_utils.R"), local = geneset_tools)
 fgsea_tools <- new.env()
 source(file.path(src_dir, "./fgsea.R"), local = fgsea_tools)
 
+util_tools <- new.env()
+source(file.path(src_dir, "./utils.R"), local = util_tools)
+
 plot_tools <- new.env()
 source(file.path(src_dir, "./plot.R"), local = plot_tools)
 
@@ -40,6 +43,25 @@ test_that("test formatting for barplot", {
   testthat::expect_true(
     all(c("leadingEdgeNum", "leadingEdgeFrac") %in% colnames(out))
   )
+})
+
+test_that("barplot selection variants suffix saved filenames", {
+  saved_files <- character(0)
+  fake_save <- function(plot_code, path = "", filename = "", width = NULL, height = NULL, ...) {
+    saved_files <<- c(saved_files, file.path(path, paste0(filename, ".pdf")))
+    TRUE
+  }
+  fake_save <- util_tools$make_partial(fake_save, path = tempdir(), filename = "base")
+
+  plot_tools$all_barplots_with_numbers(
+    list(H_ = list(sample_A = TEST_DATA$H_[[1]])),
+    save_func = fake_save,
+    limit = 1,
+    sort_by = "pval",
+    variant_name = "fdr25_pval"
+  )
+
+  testthat::expect_true(any(grepl("fdr25_pval", basename(saved_files), fixed = TRUE)))
 })
 
 test_that("enrichplot combined and individual directories share the same pathway slug", {

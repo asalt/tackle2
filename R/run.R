@@ -586,83 +586,124 @@ run <- function(params) {
       # now plot
       plot_tools <- get_tool_env("plot")
       wordcloud_tools <- get_tool_env("plot_wordcloud")
+      barplot_variants <- util_tools$normalize_plot_selection_variants(params$barplot)
+      bubbleplot_variants <- util_tools$normalize_plot_selection_variants(params$bubbleplot)
+      variant_log_label <- function(plot_variant) {
+        variant_name <- plot_variant$name %||% ""
+        if (length(variant_name) == 0 || is.na(variant_name[[1]]) || !nzchar(as.character(variant_name[[1]]))) {
+          return("default")
+        }
+        paste0("variant=", as.character(variant_name[[1]]))
+      }
 
       # =======  barplots
       if (params$barplot$do_individual == TRUE) {
-        log_msg(msg = "plotting individual barplots")
-        plts <- results_list_for_plots %>% plot_tools$all_barplots_with_numbers(
-          # sample_order = params$rankname_order %||% params$sample_order, # no t necessary to pass this here
-          limit = params$barplot$limit %||% c(10, 20, 30, 50),
-          save_func = save_func,
-          rank_metadata = rank_metadata_for_plots
-        )
+        purrr::walk(barplot_variants, function(plot_variant) {
+          log_msg(msg = paste0("plotting individual barplots (", variant_log_label(plot_variant), ")"))
+          results_list_for_plots %>% plot_tools$all_barplots_with_numbers(
+            # sample_order = params$rankname_order %||% params$sample_order, # no t necessary to pass this here
+            limit = params$barplot$limit %||% c(10, 20, 30, 50),
+            save_func = save_func,
+            pstat_cutoff = plot_variant$pstat_cutoff,
+            pstat_usetype = plot_variant$pstat_usetype,
+            sort_by = plot_variant$sort_by,
+            variant_name = plot_variant$name,
+            variant_label = plot_variant$label,
+            rank_metadata = rank_metadata_for_plots
+          )
+        })
       }
 
       if (params$barplot$do_combined == TRUE) {
-        log_msg(msg = "plotting faceted barplots (combined)")
-        plts <- tryCatch(
-          {
-            plot_tools$do_combined_barplots(
-              results_list_for_plots,
-              facet_order = NULL, # this isn't working properly
-              save_func = save_func,
-              limit = params$barplot$limit %||% c(10, 20, 30, 50),
-              rank_metadata = rank_metadata_for_plots
-            )
-          },
-          error = function(e) {
-            log_msg(warning = paste0("bar plot combined failed: ", conditionMessage(e)))
-            NULL
+        purrr::walk(barplot_variants, function(plot_variant) {
+          log_msg(msg = paste0("plotting faceted barplots (combined; ", variant_log_label(plot_variant), ")"))
+          plts <- tryCatch(
+            {
+              plot_tools$do_combined_barplots(
+                results_list_for_plots,
+                facet_order = NULL, # this isn't working properly
+                save_func = save_func,
+                limit = params$barplot$limit %||% c(10, 20, 30, 50),
+                pstat_cutoff = plot_variant$pstat_cutoff,
+                pstat_usetype = plot_variant$pstat_usetype,
+                sort_by = plot_variant$sort_by,
+                variant_name = plot_variant$name,
+                variant_label = plot_variant$label,
+                rank_metadata = rank_metadata_for_plots
+              )
+            },
+            error = function(e) {
+              log_msg(warning = paste0("bar plot combined failed: ", conditionMessage(e)))
+              NULL
+            }
+          )
+          if (is.null(plts)) {
+            log_msg(msg = "bar combined plots returned NULL")
           }
-        )
-        if (is.null(plts)) {
-          log_msg(msg = "bar combined plots returned NULL")
-        }
+        })
       }
 
       if (params$bubbleplot$do_individual == TRUE) {
-        log_msg(msg = paste0(
-          "plotting individual bubble plots (limits: ",
-          paste(params$bubbleplot$limit, collapse = ","),
-          "; replace=",
-          params$advanced$replace %||% TRUE,
-          ")"
-        ))
-        bubble_tools$all_bubble_plots(
-          results_list_for_plots,
-          limit = params$bubbleplot$limit,
-          save_func = save_func,
-          glyph = params$bubbleplot$glyph,
-          rank_metadata = rank_metadata_for_plots
-        )
+        purrr::walk(bubbleplot_variants, function(plot_variant) {
+          log_msg(msg = paste0(
+            "plotting individual bubble plots (",
+            variant_log_label(plot_variant),
+            "; limits: ",
+            paste(params$bubbleplot$limit, collapse = ","),
+            "; replace=",
+            params$advanced$replace %||% TRUE,
+            ")"
+          ))
+          bubble_tools$all_bubble_plots(
+            results_list_for_plots,
+            limit = params$bubbleplot$limit,
+            save_func = save_func,
+            glyph = params$bubbleplot$glyph,
+            pstat_cutoff = plot_variant$pstat_cutoff,
+            pstat_usetype = plot_variant$pstat_usetype,
+            sort_by = plot_variant$sort_by,
+            variant_name = plot_variant$name,
+            variant_label = plot_variant$label,
+            rank_metadata = rank_metadata_for_plots
+          )
+        })
       }
 
       if (params$bubbleplot$do_combined == TRUE) {
-        log_msg(msg = paste0(
-          "plotting combined bubble plots (limits: ",
-          paste(params$bubbleplot$limit, collapse = ","),
-          "; replace=",
-          params$advanced$replace %||% TRUE,
-          ")"
-        ))
-        bubble_combined_result <- tryCatch(
-          {
-            bubble_tools$do_combined_bubble_plots(
-              results_list_for_plots,
-              save_func = save_func,
-              limit = params$bubbleplot$limit,
-              glyph = params$bubbleplot$glyph,
-              rank_metadata = rank_metadata_for_plots
-            )
-          },
-          error = function(e) {
-            log_msg(warning = paste0("bubble plot combined failed: ", conditionMessage(e)))
-            NULL
+        purrr::walk(bubbleplot_variants, function(plot_variant) {
+          log_msg(msg = paste0(
+            "plotting combined bubble plots (",
+            variant_log_label(plot_variant),
+            "; limits: ",
+            paste(params$bubbleplot$limit, collapse = ","),
+            "; replace=",
+            params$advanced$replace %||% TRUE,
+            ")"
+          ))
+          bubble_combined_result <- tryCatch(
+            {
+              bubble_tools$do_combined_bubble_plots(
+                results_list_for_plots,
+                save_func = save_func,
+                limit = params$bubbleplot$limit,
+                glyph = params$bubbleplot$glyph,
+                pstat_cutoff = plot_variant$pstat_cutoff,
+                pstat_usetype = plot_variant$pstat_usetype,
+                sort_by = plot_variant$sort_by,
+                variant_name = plot_variant$name,
+                variant_label = plot_variant$label,
+                rank_metadata = rank_metadata_for_plots
+              )
+            },
+            error = function(e) {
+              log_msg(warning = paste0("bubble plot combined failed: ", conditionMessage(e)))
+              NULL
+            }
+          )
+          if (is.null(bubble_combined_result)) {
+            log_msg(msg = "bubble combined plots returned NULL")
           }
-        )
-        if (is.null(bubble_combined_result)) {
-          log_msg(msg = "bubble combined plots returned NULL")
-        }
+        })
       }
 
       # ======= per-collection wordcloud summaries

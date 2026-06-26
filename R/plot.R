@@ -1124,11 +1124,60 @@ format_source_label <- function(name) {
     stringr::str_squish()
 }
 
+selection_variant_suffix <- function(variant_name = NULL) {
+  if (is.null(variant_name) || length(variant_name) == 0) {
+    return("")
+  }
+  variant_name <- as.character(variant_name[[1]])
+  if (is.na(variant_name) || !nzchar(variant_name)) {
+    return("")
+  }
+  util_tools$safe_path_component(variant_name, fallback = "variant", max_chars = 32)
+}
+
+selection_variant_label <- function(
+    variant_name = NULL,
+    variant_label = NULL,
+    pstat_cutoff = 1,
+    pstat_usetype = "padj",
+    sort_by = "NES") {
+  if (!is.null(variant_label) && length(variant_label) > 0 && !is.na(variant_label[[1]]) && nzchar(as.character(variant_label[[1]]))) {
+    return(as.character(variant_label[[1]]))
+  }
+
+  parts <- character(0)
+  pstat_cutoff <- util_tools$normalize_plot_pstat_cutoff(pstat_cutoff, default = 1)
+  pstat_usetype <- util_tools$normalize_plot_pstat_usetype(pstat_usetype %||% "padj")
+  sort_by <- util_tools$normalize_plot_sort_by(sort_by %||% "NES")
+
+  if (!is.na(pstat_cutoff) && pstat_cutoff < 1) {
+    stat_label <- if (pstat_usetype == "padj") "FDR" else pstat_usetype
+    parts <- c(parts, paste0(stat_label, " < ", format(pstat_cutoff, trim = TRUE)))
+  }
+  if (!identical(sort_by, "NES")) {
+    parts <- c(parts, paste0("ranked by ", sort_by))
+  }
+
+  variant_suffix <- selection_variant_suffix(variant_name)
+  if (length(parts) == 0 && nzchar(variant_suffix)) {
+    parts <- c(parts, variant_suffix)
+  }
+  if (length(parts) == 0) {
+    return(NULL)
+  }
+  paste(parts, collapse = " • ")
+}
+
 all_barplots_with_numbers <- function(
     results_list,
     save_func = NULL,
     facet_order = NULL,
     limit = 20,
+    pstat_cutoff = 1,
+    pstat_usetype = "padj",
+    sort_by = "NES",
+    variant_name = NULL,
+    variant_label = NULL,
     rank_metadata = NULL,
     ...) {
   if (!is.null(save_func)) {
@@ -1144,6 +1193,14 @@ all_barplots_with_numbers <- function(
     ~ {
       collection_name <- .y
       collection_label <- format_source_label(collection_name)
+      selection_label <- selection_variant_label(
+        variant_name = variant_name,
+        variant_label = variant_label,
+        pstat_cutoff = pstat_cutoff,
+        pstat_usetype = pstat_usetype,
+        sort_by = sort_by
+      )
+      variant_suffix <- selection_variant_suffix(variant_name)
       list_of_comparisons <- .x
       # Shorten comparison names by stripping shared affixes for path components
       comparison_names <- names(list_of_comparisons)
@@ -1159,7 +1216,13 @@ all_barplots_with_numbers <- function(
               nes_max <- max(abs(dataframe$NES), na.rm=T)
               nes_range <- c(-nes_max, nes_max)
               .limit <- .x
-              sel <- fgsea_tools$select_topn(dataframe, limit = .limit, pstat_cutoff=1)
+              sel <- fgsea_tools$select_topn(
+                dataframe,
+                limit = .limit,
+                pstat_cutoff = pstat_cutoff,
+                pstat_usetype = pstat_usetype,
+                sort_by = sort_by
+              )
               if (nrow(sel) == 0) {
                 log_msg(warning = paste0(
                   "no pathways available for barplot (requested top ", .limit, ") in ",
@@ -1181,7 +1244,10 @@ all_barplots_with_numbers <- function(
               } else {
                 paste0("top ", effective_limit, " pathways")
               }
-              subtitle_text <- paste0(base_subtitle, " • source: ", collection_label)
+              subtitle_text <- paste(
+                c(base_subtitle, selection_label, paste0("source: ", collection_label)),
+                collapse = " • "
+              )
 
               local_save_func <- save_func
               save_path <- NULL
@@ -1198,6 +1264,7 @@ all_barplots_with_numbers <- function(
                   "bar",
                   paste0("top", effective_limit),
                   paste0("n", pathway_count),
+                  variant_suffix,
                   fallback = "bar"
                 )
                 local_save_func <- make_partial(local_save_func, filename = filename, path = save_path)
@@ -1233,9 +1300,22 @@ do_combined_barplots <- function(
     save_func = NULL,
     facet_order = NULL,
     limit = 20,
+    pstat_cutoff = 1,
+    pstat_usetype = "padj",
+    sort_by = "NES",
+    variant_name = NULL,
+    variant_label = NULL,
     rank_metadata = NULL,
     ...) {
   genesets <- names(results_list)
+  selection_label <- selection_variant_label(
+    variant_name = variant_name,
+    variant_label = variant_label,
+    pstat_cutoff = pstat_cutoff,
+    pstat_usetype = pstat_usetype,
+    sort_by = sort_by
+  )
+  variant_suffix <- selection_variant_suffix(variant_name)
 
   # args <- list(...)
   # if ("save_func" %in% names(args)) {
@@ -1254,7 +1334,13 @@ do_combined_barplots <- function(
       .limit <- .x
       res <- fgsea_res_list %>% bind_rows(.id = "rankname") # all comparisons 1 gene set
       # res <- res %>% mutate(rankname = rankname %>% fs::path_file() %>% fs::path_ext_remove())
-      res <- fgsea_tools$select_topn(res, limit = .limit, pstat_cutoff=1)
+      res <- fgsea_tools$select_topn(
+        res,
+        limit = .limit,
+        pstat_cutoff = pstat_cutoff,
+        pstat_usetype = pstat_usetype,
+        sort_by = sort_by
+      )
       n_sel <- res %>%
         distinct(pathway) %>%
         nrow()
@@ -1285,6 +1371,7 @@ do_combined_barplots <- function(
           "bar",
           paste0("top", effective_limit),
           paste0("n", n_sel),
+          variant_suffix,
           "all",
           fallback = "bar_all"
         )
@@ -1296,7 +1383,10 @@ do_combined_barplots <- function(
       }
       p <- res %>% barplot_with_numbers(
         title = geneset_name,
-        subtitle = paste0("top ", effective_limit, " pathways • source: ", collection_label),
+        subtitle = paste(
+          c(paste0("top ", effective_limit, " pathways"), selection_label, paste0("source: ", collection_label)),
+          collapse = " • "
+        ),
         nes_range = nes_range,
         save_func = local_save_func,
         facet_order = facet_order,
