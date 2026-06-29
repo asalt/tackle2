@@ -1,3 +1,4 @@
+import tomllib
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -12,7 +13,10 @@ def test_get_config_creates_default_files():
         assert result.exit_code == 0
         assert "Writing" in result.output
         assert "done" in result.output
-        assert (Path(f"{APP_NAME}.toml")).exists()
+        config_path = Path(f"{APP_NAME}.toml")
+        assert config_path.exists()
+        config = tomllib.loads(config_path.read_text())
+        assert config["params"]["bubbleplot"]["advanced"]["height_scale"] == 0.8
 
 
 def test_get_config_with_colormap():

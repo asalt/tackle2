@@ -191,6 +191,7 @@ class BubbleplotAdvanced(ConfigSection):
     __fields__ = {
         "stroke_width": FieldMeta(float, 0.8, "Outline width for bubble markers."),
         "stroke_alpha": FieldMeta(float, 0.55, "Outline transparency (0-1)."),
+        "height_scale": FieldMeta(float, 0.8, "Multiplier applied to bubble plot output height."),
     }
 
 

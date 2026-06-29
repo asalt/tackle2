@@ -91,6 +91,7 @@ sort_by = "pval"
 
 ### params.bubbleplot.advanced
 
+- `height_scale` (float, default `0.8`): Multiplier applied to bubble plot output height.
 - `stroke_alpha` (float, default `0.55`): Outer ring transparency (`0`–`1`).
 - `stroke_width` (float, default `0.8`): Outline width for bubble points.
 

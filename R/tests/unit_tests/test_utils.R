@@ -181,6 +181,31 @@ testthat::test_that("clean_args normalizes numeric do flags", {
   testthat::expect_false(isTRUE(cleaned$enplot$do_combined))
 })
 
+testthat::test_that("clean_args normalizes bubbleplot height scale", {
+  default_cleaned <- util_tools$clean_args(list(savedir = "plots"), root_dir = tempdir())
+  testthat::expect_equal(default_cleaned$bubbleplot$advanced$height_scale, 0.8)
+
+  custom_cleaned <- util_tools$clean_args(
+    list(
+      savedir = "plots",
+      bubbleplot = list(advanced = list(height_scale = "0.65"))
+    ),
+    root_dir = tempdir()
+  )
+  testthat::expect_equal(custom_cleaned$bubbleplot$advanced$height_scale, 0.65)
+
+  testthat::expect_error(
+    util_tools$clean_args(
+      list(
+        savedir = "plots",
+        bubbleplot = list(advanced = list(height_scale = 0))
+      ),
+      root_dir = tempdir()
+    ),
+    "positive finite"
+  )
+})
+
 testthat::test_that("plot selection variants keep default and suffix extra variants", {
   variants <- util_tools$normalize_plot_selection_variants(list(
     pstat_cutoff = 1,

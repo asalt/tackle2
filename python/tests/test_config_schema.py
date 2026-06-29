@@ -28,3 +28,4 @@ def test_describe_section_root_and_nested():
 
     advanced = config_schema.describe_section("params.bubbleplot.advanced")
     assert any(field.name == "stroke_width" for field in advanced.fields)
+    assert any(field.name == "height_scale" for field in advanced.fields)

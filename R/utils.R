@@ -47,6 +47,15 @@ normalize_plot_pstat_cutoff <- function(x, default = 1) {
   x
 }
 
+normalize_positive_number <- function(x, default, name = "value") {
+  x <- scalar_or_default(x, default)
+  x <- suppressWarnings(as.numeric(x)[1])
+  if (is.na(x) || !is.finite(x) || x <= 0) {
+    stop(paste0(name, " must be a positive finite number"))
+  }
+  x
+}
+
 normalize_plot_pstat_usetype <- function(x, default = "padj") {
   x <- scalar_or_default(x, default)
   x <- trimws(tolower(as.character(x)[1]))
@@ -270,6 +279,11 @@ clean_args <- function(params, root_dir = "/") {
   params$bubbleplot$sort_by <- normalize_plot_sort_by(params$bubbleplot$sort_by %||% params$barplot$sort_by)
   params$bubbleplot$variants <- params$bubbleplot$variants %||% list()
   params$bubbleplot$glyph <- params$bubbleplot$glyph %||% "⁕"
+  params$bubbleplot$advanced$height_scale <- normalize_positive_number(
+    params$bubbleplot$advanced$height_scale,
+    default = 0.8,
+    name = "params$bubbleplot$advanced$height_scale"
+  )
 
   params$heatmap_gsea$do <- normalize_bool(params$heatmap_gsea$do, default = TRUE)
   params$heatmap_gene$do <- normalize_bool(params$heatmap_gene$do, default = TRUE)

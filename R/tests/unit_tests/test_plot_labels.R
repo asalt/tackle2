@@ -38,6 +38,29 @@ make_faceted_plot_df <- function() {
   df
 }
 
+make_many_faceted_bar_df <- function(n_pathways = 40, n_facets = 4) {
+  pathways <- paste0(
+    "HALLMARK_LONG_PATHWAY_NAME_WITH_MULTIPLE_TOKENS_",
+    seq_len(n_pathways)
+  )
+  ranknames <- paste0(
+    "group_alpha_long_context_",
+    seq_len(n_facets),
+    "_minus_group_beta_long_context_",
+    seq_len(n_facets)
+  )
+  grid <- expand.grid(
+    pathway = pathways,
+    rankname = ranknames,
+    stringsAsFactors = FALSE
+  )
+  grid$NES <- rep(seq(-2, 2, length.out = n_pathways), times = n_facets)
+  grid$padj <- 0.01
+  grid$size <- 10
+  grid$leadingEdge <- I(rep(list(c("A", "B", "C")), nrow(grid)))
+  grid
+}
+
 test_that("display labels preserve hyphenated contrast tokens", {
   expect_equal(
     plot_tools$format_display_label("group_alpha_x-y"),
@@ -115,6 +138,24 @@ test_that("faceted barplots disable strip clipping and keep strip padding", {
   expect_true(all(grepl("x-y", plot_tools$format_display_label(unique(plt$data$rankname)))))
 })
 
+test_that("faceted barplot sizing grows more slowly for many pathways", {
+  saved_dims <- NULL
+  fake_save <- function(plot_code, width = NULL, height = NULL, ...) {
+    saved_dims <<- c(width = width, height = height)
+    TRUE
+  }
+
+  plt <- plot_tools$barplot_with_numbers(
+    make_many_faceted_bar_df(n_pathways = 40, n_facets = 4),
+    save_func = fake_save,
+    title = "many faceted pathways"
+  )
+
+  expect_true(any(grepl("\n", as.character(plt$data$pathway), fixed = TRUE)))
+  expect_lt(saved_dims[["height"]], 16)
+  expect_gt(saved_dims[["height"]], 7)
+})
+
 test_that("faceted bubble plots disable strip clipping and keep strip padding", {
   plt <- bubble_tools$bubble_plot(
     make_faceted_plot_df(),
@@ -125,4 +166,45 @@ test_that("faceted bubble plots disable strip clipping and keep strip padding", 
   expect_equal(plt$theme$strip.clip, "off")
   expect_false(is.null(plt$theme$strip.text$margin))
   expect_true(all(grepl("x-y", plot_tools$format_display_label(unique(plt$data$rankname)))))
+})
+
+test_that("faceted bubble plot sizing grows more slowly for many pathways", {
+  saved_dims <- NULL
+  fake_save <- function(plot_code, width = NULL, height = NULL, ...) {
+    saved_dims <<- c(width = width, height = height)
+    TRUE
+  }
+
+  plt <- bubble_tools$bubble_plot(
+    make_many_faceted_bar_df(n_pathways = 40, n_facets = 4),
+    save_func = fake_save,
+    title = "many faceted pathways"
+  )
+
+  expect_true(any(grepl("\n", as.character(plt$data$pathway), fixed = TRUE)))
+  expect_lt(saved_dims[["height"]], 10)
+  expect_gt(saved_dims[["height"]], 7)
+})
+
+test_that("bubble height scale compacts saved plot height", {
+  saved_dims <- list()
+  fake_save <- function(plot_code, width = NULL, height = NULL, ...) {
+    saved_dims[[length(saved_dims) + 1]] <<- c(width = width, height = height)
+    TRUE
+  }
+
+  bubble_tools$bubble_plot(
+    make_many_faceted_bar_df(n_pathways = 20, n_facets = 4),
+    save_func = fake_save,
+    title = "unscaled bubble pathways",
+    height_scale = 1
+  )
+  bubble_tools$bubble_plot(
+    make_many_faceted_bar_df(n_pathways = 20, n_facets = 4),
+    save_func = fake_save,
+    title = "scaled bubble pathways",
+    height_scale = 0.75
+  )
+
+  expect_equal(saved_dims[[2]][["height"]], saved_dims[[1]][["height"]] * 0.75)
 })

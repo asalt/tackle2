@@ -28,12 +28,12 @@ format_source_label <- function(name) {
     stringr::str_squish()
 }
 
-prepare_data_for_bubble <- function(df, glyph = DEFAULT_BUBBLE_GLYPH) {
+prepare_data_for_bubble <- function(df, glyph = DEFAULT_BUBBLE_GLYPH, wrap_width = 52) {
   if (!"pval" %in% colnames(df)) {
     df <- df %>% mutate(pval = padj)
   }
 
-  plot_tools$prepare_data_for_barplot(df) %>%
+  plot_tools$prepare_data_for_barplot(df, wrap_width = wrap_width) %>%
     mutate(
       padj = {
         tmp <- padj
@@ -72,10 +72,16 @@ bubble_plot <- function(
     nes_range = NULL,
     size_range = c(3.0, 9.0),
     glyph = DEFAULT_BUBBLE_GLYPH,
+    height_scale = 0.8,
     rank_metadata = NULL,
     ...) {
 
-  sel <- prepare_data_for_bubble(df, glyph = glyph)
+  height_scale <- util_tools$normalize_positive_number(height_scale, default = 0.8, name = "height_scale")
+  is_faceted_input <- "rankname" %in% colnames(df) && length(unique(df$rankname)) > 1
+  pathway_wrap_width <- if (is_faceted_input) 36 else 52
+  facet_label_wrap_width <- if (is_faceted_input) 34 else 54
+
+  sel <- prepare_data_for_bubble(df, glyph = glyph, wrap_width = pathway_wrap_width)
   log_msg(msg = paste0("bubble_plot: received ", nrow(df), " rows, plotting ", nrow(sel), " after prep"))
 
   if (nrow(sel) == 0) {
@@ -92,7 +98,7 @@ bubble_plot <- function(
   }
 
   custom_labeller <- function(value) {
-    plot_tools$format_display_label(value, wrap_width = 54)
+    plot_tools$format_display_label(value, wrap_width = facet_label_wrap_width)
   }
 
   if ("rankname" %in% names(sel)) {
@@ -134,6 +140,7 @@ bubble_plot <- function(
     stringr::str_replace_all("\n", " ") %>%
     stringr::str_squish()
   max_label_chars <- if (length(pathway_chars) > 0) max(nchar(pathway_chars)) else 0
+  n_pathways_label <- dplyr::n_distinct(sel$pathway)
   # Align size scaling with heatmap/barplot conventions
   axis_text_y_size <- dplyr::case_when(
     max_label_chars < 36 ~ 7.6,
@@ -141,8 +148,11 @@ bubble_plot <- function(
     max_label_chars < 84 ~ 6.2,
     TRUE ~ 5.2
   )
+  if (is_faceted_input) {
+    axis_text_y_size <- min(axis_text_y_size, if (n_pathways_label > 35) 5.6 else 6.2)
+  }
   strip_label_chars <- if ("rankname" %in% names(sel)) {
-    plot_tools$format_display_label(sel$rankname) %>%
+    custom_labeller(sel$rankname) %>%
       stringr::str_replace_all("\n", " ")
   } else {
     character(0)
@@ -211,14 +221,15 @@ bubble_plot <- function(
     ) +
     theme_bw() +
     theme(
-      axis.text.y = element_text(size = axis_text_y_size, face = "bold"),
+      axis.text.y = element_text(size = axis_text_y_size, face = "bold", lineheight = 0.9),
       axis.text.x = element_text(size = 7.0),
       plot.title = element_text(size = 10, face = "bold", hjust = 0),
-      plot.subtitle = element_text(hjust = 0),
+      plot.subtitle = element_text(hjust = 0, lineheight = 0.95),
       strip.text = element_text(
         size = strip_text_size,
         face = "bold",
         hjust = 0.5,
+        lineheight = 0.92,
         margin = margin(t = 2.5, r = 6, b = 2.5, l = 6)
       ),
       strip.clip = "off",
@@ -271,7 +282,7 @@ bubble_plot <- function(
     p <- p + coord_cartesian(xlim = c(nes_range[1], nes_range[2]))
   }
 
-  if ("rankname" %in% colnames(sel) && length(unique(sel$rankname)) > 1) {
+  if (is_faceted_input) {
     p <- p + facet_wrap(~rankname, labeller = as_labeller(custom_labeller))
     num_panels <- length(unique(sel$rankname))
     ncol <- ceiling(sqrt(num_panels))
@@ -285,15 +296,27 @@ bubble_plot <- function(
   # Compute height so each pathway row has reasonable space
   n_pathways <- dplyr::n_distinct(sel$pathway)
   text_scale <- axis_text_y_size / 6.6
-  per_row_in <- dplyr::case_when(
-    n_pathways <= 20 ~ 0.24,
-    n_pathways <= 60 ~ 0.21,
-    TRUE ~ 0.18
-  ) * text_scale
-  per_row_in <- max(min(per_row_in, 0.30), 0.14)
-  min_panel_height_in <- 2.8
-  facet_strip_pad_in <- 0.30
+  if (is_faceted_input) {
+    per_row_in <- dplyr::case_when(
+      n_pathways <= 20 ~ 0.21,
+      n_pathways <= 60 ~ 0.155,
+      TRUE ~ 0.13
+    ) * text_scale
+    per_row_in <- max(min(per_row_in, 0.25), 0.11)
+    min_panel_height_in <- 2.8
+    facet_strip_pad_in <- 0.30
+  } else {
+    per_row_in <- dplyr::case_when(
+      n_pathways <= 20 ~ 0.24,
+      n_pathways <= 60 ~ 0.21,
+      TRUE ~ 0.18
+    ) * text_scale
+    per_row_in <- max(min(per_row_in, 0.30), 0.14)
+    min_panel_height_in <- 2.8
+    facet_strip_pad_in <- 0.30
+  }
   panel_height_in_calc <- max(min_panel_height_in, per_row_in * n_pathways + facet_strip_pad_in)
+  panel_height_in_calc <- panel_height_in_calc * height_scale
   total_width_in <- 2.2 + (panel_width_in * ncol)
   total_height_in <- panel_height_in_calc * nrow
 
@@ -327,6 +350,7 @@ all_bubble_plots <- function(
     limit = 20,
     size_range = c(3.0, 9.0),
     glyph = DEFAULT_BUBBLE_GLYPH,
+    height_scale = 0.8,
     pstat_cutoff = 1,
     pstat_usetype = "padj",
     sort_by = "NES",
@@ -432,6 +456,7 @@ all_bubble_plots <- function(
               nes_range = nes_range,
               size_range = size_range,
               glyph = glyph,
+              height_scale = height_scale,
               rank_metadata = rank_metadata,
               ...
             )
@@ -449,6 +474,7 @@ do_combined_bubble_plots <- function(
     limit = 20,
     size_range = c(3.0, 9.0),
     glyph = DEFAULT_BUBBLE_GLYPH,
+    height_scale = 0.8,
     pstat_cutoff = 1,
     pstat_usetype = "padj",
     sort_by = "NES",
@@ -528,6 +554,7 @@ do_combined_bubble_plots <- function(
         nes_range = nes_range,
         size_range = size_range,
         glyph = glyph,
+        height_scale = height_scale,
         rank_metadata = rank_metadata,
         ...
       )

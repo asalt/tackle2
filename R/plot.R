@@ -828,7 +828,7 @@ apply_rank_labels_to_rankorder <- function(rankorder, rank_metadata = NULL) {
 # Parameters:
 #   - df: The dataframe containing the data for the barplot.
 # Returns: None
-prepare_data_for_barplot <- function(df) {
+prepare_data_for_barplot <- function(df, wrap_width = 52) {
   df_renamed <- df %>%
     dplyr::mutate(pathway = stringr::str_remove(pathway, "HALLMARK_")) %>%
     dplyr::mutate(pathway = stringr::str_remove(pathway, "KEGG_")) %>%
@@ -853,7 +853,7 @@ prepare_data_for_barplot <- function(df) {
   sel <- df %>%
     arrange(-abs(NES)) %>%
     arrange(-NES) %>%
-    mutate(pathway = str_replace_all(pathway, "_", " ") %>% str_wrap(width = 52)) %>%
+    mutate(pathway = str_replace_all(pathway, "_", " ") %>% str_wrap(width = wrap_width)) %>%
     mutate(pathway = factor(pathway, levels = unique(pathway), ordered = T)) %>%
     arrange(pathway) # %>%
 
@@ -908,11 +908,15 @@ barplot_with_numbers <- function(
   }
 
 
-  sel <- prepare_data_for_barplot(df)
+  is_faceted_input <- "rankname" %in% colnames(df) && length(unique(df$rankname)) > 1
+  pathway_wrap_width <- if (is_faceted_input) 36 else 52
+  facet_label_wrap_width <- if (is_faceted_input) 34 else 54
+
+  sel <- prepare_data_for_barplot(df, wrap_width = pathway_wrap_width)
 
 
   custom_labeller <- function(value) {
-    format_display_label(value, wrap_width = 54)
+    format_display_label(value, wrap_width = facet_label_wrap_width)
   }
   labeller_func <- custom_labeller
 
@@ -951,14 +955,18 @@ barplot_with_numbers <- function(
     stringr::str_replace_all("\n", " ") %>%
     stringr::str_squish()
   max_label_chars <- if (length(pathway_chars) > 0) max(nchar(pathway_chars)) else 0
+  n_pathways_label <- dplyr::n_distinct(sel$pathway)
   axis_text_y_size <- dplyr::case_when(
     max_label_chars < 36 ~ 7.6,
     max_label_chars < 64 ~ 6.6,
     max_label_chars < 84 ~ 6.2,
     TRUE ~ 5.2
   )
+  if (is_faceted_input) {
+    axis_text_y_size <- min(axis_text_y_size, if (n_pathways_label > 35) 5.6 else 6.2)
+  }
   strip_label_chars <- if ("rankname" %in% names(sel)) {
-    format_display_label(sel$rankname) %>%
+    labeller_func(sel$rankname) %>%
       stringr::str_replace_all("\n", " ")
   } else {
     character(0)
@@ -1043,17 +1051,18 @@ barplot_with_numbers <- function(
       vjust = 0.5, hjust = 0.5
     ) +
     theme_bw() + theme(
-      axis.text.y = element_text(size = axis_text_y_size, face = "bold"),
+      axis.text.y = element_text(size = axis_text_y_size, face = "bold", lineheight = 0.9),
       axis.text.x = element_text(size = 7.0),
       plot.title = element_text(size = 14, face = "bold", hjust = 0),
       strip.text.x = element_text(
         size = strip_text_size,
         face = "bold",
         hjust = 0.5,
+        lineheight = 0.92,
         margin = margin(t = 2.5, r = 6, b = 2.5, l = 6)
       ),
       strip.clip = "off",
-      plot.subtitle = element_text(hjust = 0),
+      plot.subtitle = element_text(hjust = 0, lineheight = 0.95),
       plot.margin = margin(t = 6, r = 10, b = 6, l = 6)
     )
 
@@ -1074,7 +1083,7 @@ barplot_with_numbers <- function(
 
   }
 
-  if ("rankname" %in% colnames(df) && (length(unique(df$rankname)) > 1)) {
+  if (is_faceted_input) {
     log_msg(info = "facet wrapping by rankname")
     p <- p + facet_wrap(~rankname, labeller = as_labeller(labeller_func))
     num_panels <- length(unique(df$rankname))
@@ -1088,14 +1097,25 @@ barplot_with_numbers <- function(
   # Height scales linearly with number of rows and respects facet rows
   n_pathways <- dplyr::n_distinct(sel$pathway)
   text_scale <- axis_text_y_size / 6.6
-  per_row_in <- dplyr::case_when(
-    n_pathways <= 20 ~ 0.28,
-    n_pathways <= 60 ~ 0.25,
-    TRUE ~ 0.26
-  ) * text_scale
-  per_row_in <- max(min(per_row_in, 0.34), 0.18)
-  min_panel_height_in <- 3.2
-  facet_strip_pad_in <- 0.35
+  if (is_faceted_input) {
+    per_row_in <- dplyr::case_when(
+      n_pathways <= 20 ~ 0.20,
+      n_pathways <= 60 ~ 0.145,
+      TRUE ~ 0.12
+    ) * text_scale
+    per_row_in <- max(min(per_row_in, 0.24), 0.10)
+    min_panel_height_in <- 2.6
+    facet_strip_pad_in <- 0.30
+  } else {
+    per_row_in <- dplyr::case_when(
+      n_pathways <= 20 ~ 0.28,
+      n_pathways <= 60 ~ 0.25,
+      TRUE ~ 0.26
+    ) * text_scale
+    per_row_in <- max(min(per_row_in, 0.34), 0.18)
+    min_panel_height_in <- 3.2
+    facet_strip_pad_in <- 0.35
+  }
   panel_height_in <- max(min_panel_height_in, per_row_in * n_pathways + facet_strip_pad_in)
 
   # Calculate total figure size
