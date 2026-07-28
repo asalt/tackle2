@@ -719,7 +719,112 @@ safe_filename <- function(..., fallback = "file", max_chars = 80, delim = "_") {
   return(candidate)
 }
 
-# --- Smart label shortening helpers ------------------------------------
+# --- Rank display labels ------------------------------------------------
+
+.rank_label_suffix_pattern <- paste0(
+  "_(?:imv|fna|dir|lrob|ltrd|sort|pvalue|padj)_"
+)
+
+.trim_rank_label_suffix <- function(value) {
+  suffix_start <- regexpr(
+    .rank_label_suffix_pattern,
+    value,
+    ignore.case = TRUE,
+    perl = TRUE
+  )[[1]]
+  if (suffix_start > 0) {
+    return(substr(value, 1L, suffix_start - 1L))
+  }
+  value
+}
+
+.extract_repeated_metadata_contrast <- function(value) {
+  operator_match <- regexpr("_(?:minus|vs|by)_", value, ignore.case = TRUE, perl = TRUE)
+  if (operator_match[[1]] < 1L) {
+    return(NULL)
+  }
+
+  operator_start <- operator_match[[1]]
+  operator_length <- attr(operator_match, "match.length")
+  left <- substr(value, 1L, operator_start - 1L)
+  operator <- substr(value, operator_start, operator_start + operator_length - 1L)
+  right <- substr(value, operator_start + operator_length, nchar(value))
+  right <- .trim_rank_label_suffix(right)
+
+  left_tokens <- strsplit(left, "_", fixed = TRUE)[[1]]
+  right_tokens <- strsplit(right, "_", fixed = TRUE)[[1]]
+  if (length(left_tokens) < 2L || length(right_tokens) < 1L) {
+    return(NULL)
+  }
+
+  right_head <- tolower(right_tokens[[1]])
+  candidates <- which(vapply(seq_len(length(left_tokens) - 1L), function(ix) {
+    key <- tolower(left_tokens[[ix]])
+    left_head <- tolower(left_tokens[[ix + 1L]])
+    nchar(key) >= 3L &&
+      nchar(left_head) > nchar(key) &&
+      nchar(right_head) > nchar(key) &&
+      startsWith(left_head, key) &&
+      startsWith(right_head, key)
+  }, logical(1)))
+  if (length(candidates) == 0L) {
+    return(NULL)
+  }
+
+  metadata_index <- tail(candidates, 1L)
+  contrast_left <- paste(left_tokens[(metadata_index + 1L):length(left_tokens)], collapse = "_")
+  contrast_right <- paste(right_tokens, collapse = "_")
+  paste0(contrast_left, operator, contrast_right)
+}
+
+extract_rank_display_label <- function(value) {
+  value <- as.character(value)
+  if (length(value) == 0L) {
+    return("")
+  }
+  if (is.na(value[[1]]) || !nzchar(value[[1]])) {
+    return("")
+  }
+  value <- value[[1]]
+
+  # Tackle volcano names put the complete biological comparison in `group`.
+  group_match <- regexpr("(?:^|_)group_", value, ignore.case = TRUE, perl = TRUE)
+  if (group_match[[1]] > 0L) {
+    contrast_start <- group_match[[1]] + attr(group_match, "match.length")
+    contrast <- substr(value, contrast_start, nchar(value))
+    contrast <- .trim_rank_label_suffix(contrast)
+    contrast <- gsub("^_+|_+$", "", contrast)
+    if (nzchar(contrast)) {
+      return(contrast)
+    }
+  }
+
+  repeated_metadata_contrast <- .extract_repeated_metadata_contrast(value)
+  if (!is.null(repeated_metadata_contrast) && nzchar(repeated_metadata_contrast)) {
+    return(repeated_metadata_contrast)
+  }
+
+  value
+}
+
+make_default_rank_label_map <- function(strings) {
+  strings <- as.character(strings)
+  labels <- vapply(strings, extract_rank_display_label, character(1), USE.NAMES = FALSE)
+  labels[is.na(labels) | !nzchar(labels)] <- strings[is.na(labels) | !nzchar(labels)]
+
+  duplicated_labels <- duplicated(labels) | duplicated(labels, fromLast = TRUE)
+  if (any(duplicated_labels)) {
+    log_msg(warning = paste0(
+      "automatic rank labels would collide; retaining canonical names for: ",
+      paste(strings[duplicated_labels], collapse = ", ")
+    ))
+    labels[duplicated_labels] <- strings[duplicated_labels]
+  }
+
+  stats::setNames(labels, strings)
+}
+
+# --- Generic label shortening helpers ----------------------------------
 
 # Compute the longest common prefix among a character vector
 .longest_common_prefix <- function(strings) {

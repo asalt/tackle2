@@ -197,6 +197,41 @@ test_that("duplicate rank label repair validates labels and supports custom sepa
   )
 })
 
+test_that("GCT species mismatch is caught before cached rank files are loaded", {
+  withr::with_tempdir({
+    gct <- io_tools$make_random_gct(8, 2)
+    gct@rid <- as.character(seq_len(nrow(gct@mat)))
+    rownames(gct@mat) <- gct@rid
+    gct@rdesc$id <- gct@rid
+    gct@rdesc$TaxonID <- "10116"
+    rownames(gct@rdesc) <- gct@rid
+
+    gct_path <- file.path(getwd(), "rat_input.gct")
+    cmapR::write_gct(gct, gct_path, appenddim = FALSE)
+
+    fs::dir_create("ranks")
+    readr::write_lines("1\t0.5\n2\t-0.2", "ranks/sample_A.rnk")
+
+    params <- list(
+      rankfiledir = "ranks",
+      volcanodir = NULL,
+      gct_path = gct_path,
+      ranks_from = "gct",
+      species = "Mus musculus",
+      sample_exclude = NULL,
+      zscore_emat = FALSE,
+      zscore_emat_groupby = FALSE,
+      extra = list(rankname_order = NULL),
+      advanced = list(exclude_samples_from_data = FALSE)
+    )
+
+    expect_error(
+      io_tools$load_and_process_rank_inputs(params),
+      "GCT TaxonID/species mismatch.*Rattus norvegicus.*Mus musculus"
+    )
+  })
+})
+
 test_that("rankname_order remains canonical and overrides names.txt ordering", {
   withr::with_tempdir({
     fs::dir_create("ranks")
@@ -504,6 +539,58 @@ test_that("save_individual_gsea_results preserves common suffixes in filenames",
     expect_equal(length(files), 2)
     expect_true(all(stringr::str_detect(files, "Control_X9Q2")))
     expect_false(any(stringr::str_detect(files, "group(ABC|DEF)\\.tsv$")))
+  })
+})
+
+test_that("save_individual_gsea_results extracts complete contrast labels", {
+  withr::with_tempdir({
+    out_dir <- file.path(getwd(), "gsea_tables")
+    res <- readRDS(file.path(here("R/tests/unit_tests/fixtures/fgsea_basic_results.rds")))
+    base_res <- dplyr::filter(res, rankname == "sample_A")
+    ranknames <- c(
+      "RUN_A4B8_20260714_nz2_dir_B_fna_T_group_groupIR_left_minus_groupnone_pre_imv_T_med",
+      "RUN_A4B8_20260714_nz2_dir_B_fna_T_group_groupIR_right_minus_groupnone_pre_imv_T_med"
+    )
+    results_list <- list(H = stats::setNames(list(base_res, base_res), ranknames))
+
+    io_tools$save_individual_gsea_results(
+      results_list = results_list,
+      savedir = out_dir,
+      replace = TRUE
+    )
+
+    files <- basename(fs::dir_ls(out_dir, glob = "*.tsv"))
+    expect_equal(length(files), 2)
+    expect_true(any(stringr::str_detect(files, "^H_groupIR_left_minus_groupnone_pre\\.tsv$")))
+    expect_true(any(stringr::str_detect(files, "^H_groupIR_right_minus_groupnone_pre\\.tsv$")))
+    expect_false(any(stringr::str_detect(files, "^H_(left|right)_minus")))
+  })
+})
+
+test_that("save_individual_gsea_results honors explicit rank labels", {
+  withr::with_tempdir({
+    out_dir <- file.path(getwd(), "gsea_tables")
+    res <- readRDS(file.path(here("R/tests/unit_tests/fixtures/fgsea_basic_results.rds")))
+    base_res <- dplyr::filter(res, rankname == "sample_A")
+    ranknames <- c("canonical_left", "canonical_right")
+    results_list <- list(H = stats::setNames(list(base_res, base_res), ranknames))
+    rank_metadata <- data.frame(
+      rankname = ranknames,
+      rank_label = c("IR left vs pre", "IR right vs pre"),
+      rank_order = seq_along(ranknames),
+      rank_label_source = "names.txt",
+      stringsAsFactors = FALSE
+    )
+
+    io_tools$save_individual_gsea_results(
+      results_list = results_list,
+      savedir = out_dir,
+      replace = TRUE,
+      rank_metadata = rank_metadata
+    )
+
+    files <- sort(basename(fs::dir_ls(out_dir, glob = "*.tsv")))
+    expect_equal(files, c("H_IR_left_vs_pre.tsv", "H_IR_right_vs_pre.tsv"))
   })
 })
 

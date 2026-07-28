@@ -119,6 +119,53 @@ testthat::test_that("make_name_map suffix stripping is explicit opt-in", {
   testthat::expect_equal(attr(suffix_map, "removed_suffix"), "_vs_control")
 })
 
+testthat::test_that("default rank labels extract complete tackle contrasts", {
+  ranknames <- c(
+    "RUN_A4B8_20260714_nz2_dir_B_fna_T_group_groupIR_left_minus_groupnone_pre_imv_T_med",
+    "RUN_A4B8_20260714_nz2_dir_B_fna_T_group_groupIR_right_minus_groupnone_pre_imv_T_med",
+    "MSPC1490_group2_20260710_nz1_dir_B_fna_T_group_grouplEV_BT_minus_groupsEV_BT_imv_T_med",
+    "RUN_C3D9_normtype_med_imv_T_fna_F_group_PCL_PEG_Bi_vs_Ctrl_Wk12_dir_B",
+    "PCL_Bi_vs_Ctrl_Wk12"
+  )
+
+  name_map <- util_tools$make_default_rank_label_map(ranknames)
+
+  testthat::expect_equal(
+    unname(name_map),
+    c(
+      "groupIR_left_minus_groupnone_pre",
+      "groupIR_right_minus_groupnone_pre",
+      "grouplEV_BT_minus_groupsEV_BT",
+      "PCL_PEG_Bi_vs_Ctrl_Wk12",
+      "PCL_Bi_vs_Ctrl_Wk12"
+    )
+  )
+})
+
+testthat::test_that("default rank labels handle repeated metadata keys without tackle flags", {
+  ranknames <- c(
+    "RUN_A4B8_treatment_treatmentB_minus_treatmentA",
+    "BATCH_X9Q2_metadata-var_metadata-varB_minus_metadata-varA"
+  )
+
+  name_map <- util_tools$make_default_rank_label_map(ranknames)
+
+  testthat::expect_equal(
+    unname(name_map),
+    c("treatmentB_minus_treatmentA", "metadata-varB_minus_metadata-varA")
+  )
+})
+
+testthat::test_that("default rank labels fall back on collisions", {
+  ranknames <- c(
+    "RUN_A4B8_group_treatmentB_minus_treatmentA_imv_T_med",
+    "RUN_C3D9_group_treatmentB_minus_treatmentA_imv_F_none"
+  )
+
+  name_map <- util_tools$make_default_rank_label_map(ranknames)
+  testthat::expect_equal(unname(name_map), ranknames)
+})
+
 testthat::test_that("safe_filename normalizes troublesome label characters", {
   labels <- c(
     "A4B8-Sunk_My_Battleship",

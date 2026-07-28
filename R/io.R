@@ -25,6 +25,122 @@ log_msg <- util_tools$make_partial(util_tools$log_msg)
 
 # ==
 
+species_taxon_id_map <- function() {
+  c(
+    "homo sapiens" = "9606",
+    "human" = "9606",
+    "mus musculus" = "10090",
+    "mouse" = "10090",
+    "rattus norvegicus" = "10116",
+    "rat" = "10116"
+  )
+}
+
+species_label_for_taxon_id <- function(taxon_id) {
+  labels <- c(
+    "9606" = "Homo sapiens",
+    "10090" = "Mus musculus",
+    "10116" = "Rattus norvegicus"
+  )
+  out <- unname(labels[as.character(taxon_id)])
+  out[is.na(out)] <- "unknown species"
+  out
+}
+
+expected_taxon_id_for_species <- function(species) {
+  if (is.null(species) || length(species) == 0 || is.na(species[[1]])) {
+    return(NULL)
+  }
+  key <- tolower(trimws(as.character(species[[1]])))
+  species_taxon_id_map()[[key]] %||% NULL
+}
+
+read_gct_taxon_ids <- function(gct_path, max_rows = 2000L) {
+  if (is.null(gct_path) || length(gct_path) == 0 || !file.exists(gct_path)) {
+    return(character(0))
+  }
+
+  con <- file(gct_path, open = "r")
+  on.exit(close(con), add = TRUE)
+  version <- readLines(con, n = 1, warn = FALSE)
+  dims_line <- readLines(con, n = 1, warn = FALSE)
+  if (length(version) == 0 || length(dims_line) == 0 || !identical(version[[1]], "#1.3")) {
+    return(character(0))
+  }
+
+  dims <- suppressWarnings(as.integer(strsplit(dims_line[[1]], "\t", fixed = TRUE)[[1]]))
+  if (length(dims) < 4 || any(is.na(dims[1:4]))) {
+    return(character(0))
+  }
+  n_rows <- dims[[1]]
+  n_col_metadata <- dims[[4]]
+
+  header_line <- readLines(con, n = 1, warn = FALSE)
+  if (length(header_line) == 0) {
+    return(character(0))
+  }
+  header <- strsplit(header_line[[1]], "\t", fixed = TRUE)[[1]]
+  taxon_idx <- match("TaxonID", header)
+  if (is.na(taxon_idx)) {
+    return(character(0))
+  }
+
+  if (n_col_metadata > 0) {
+    readLines(con, n = n_col_metadata, warn = FALSE)
+  }
+
+  data_lines <- readLines(con, n = min(max_rows, n_rows), warn = FALSE)
+  if (length(data_lines) == 0) {
+    return(character(0))
+  }
+
+  taxa <- vapply(
+    strsplit(data_lines, "\t", fixed = TRUE),
+    function(parts) {
+      if (length(parts) < taxon_idx) {
+        return(NA_character_)
+      }
+      parts[[taxon_idx]]
+    },
+    character(1)
+  )
+  taxa <- trimws(taxa)
+  unique(taxa[!is.na(taxa) & nzchar(taxa) & tolower(taxa) != "na"])
+}
+
+validate_gct_species <- function(gct_path, species, logger = NULL) {
+  if (is.null(logger)) logger <- log_msg
+  expected_taxon <- expected_taxon_id_for_species(species)
+  if (is.null(expected_taxon)) {
+    return(invisible(TRUE))
+  }
+
+  observed_taxa <- read_gct_taxon_ids(gct_path)
+  if (length(observed_taxa) == 0) {
+    return(invisible(TRUE))
+  }
+  if (all(observed_taxa == expected_taxon)) {
+    return(invisible(TRUE))
+  }
+
+  observed_labels <- paste0(
+    species_label_for_taxon_id(observed_taxa),
+    " (TaxonID ",
+    observed_taxa,
+    ")"
+  )
+  expected_label <- paste0(species_label_for_taxon_id(expected_taxon), " (TaxonID ", expected_taxon, ")")
+  stop(paste0(
+    "GCT TaxonID/species mismatch: gct_path appears to contain ",
+    paste(observed_labels, collapse = ", "),
+    " but params$species is '",
+    species,
+    "'; expected ",
+    expected_label,
+    ". Update params.species or use rank files generated for the configured species."
+  ))
+}
+
 normalize_rank_names <- function(x) {
   out <- fs::path_file(as.character(x))
   is_missing <- is.na(out)
@@ -654,12 +770,12 @@ log_msg(msg = paste0("length results list :", length(results_list)))
   results_list_towrite <- results_list %>% purrr::imap(~{
     result_list  <- .x #%>% map_tools$add_leadingedges_to_results_list()
     collection_name <- .y
-    # Construct a comparison name map to shorten labels for files within this collection
+    # Use explicit downstream labels when supplied; otherwise retain canonical names.
     comparison_names <- names(result_list)
     name_map <- if (has_explicit_rank_labels(rank_metadata, comparison_names)) {
       rank_label_map(rank_metadata, comparison_names)
     } else {
-      util_tools$make_name_map(comparison_names)
+      util_tools$make_default_rank_label_map(comparison_names)
     }
     result_list %>% purrr::imap(~{
       result <- .x
@@ -798,6 +914,10 @@ load_and_process_rank_inputs <- function(params) {
 
   log_msg(msg = paste0("ranks from : ", ranks_from))
   log_msg(msg = paste0("rankfiledir : ", rankfiledir))
+
+  if (identical(ranks_from, "gct") && !is.null(gct_path) && file.exists(gct_path)) {
+    validate_gct_species(gct_path, params$species %||% "Homo sapiens", logger = log_msg)
+  }
 
   if (!is.null(rankfiledir) && file.exists(rankfiledir)) { #
     rnkfiles <- dir_ls(path = rankfiledir, regexp = ".*\\.rnk$", fail = FALSE)
