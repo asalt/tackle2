@@ -379,6 +379,7 @@ run <- function(params) {
         log_msg(warning = paste0("No geneset spec found for collection: ", .x, "; skipping"))
         return(invisible(NULL))
       }
+      collection_collapse <- isTRUE(as.logical(collection_spec$collapse[[1]]))
 
       list_of_geneset_dfs <- geneset_tools$get_collections(collection_spec, species = species)
       genesets_list_of_lists <- list_of_geneset_dfs %>%
@@ -603,6 +604,7 @@ run <- function(params) {
           results_list_for_plots %>% plot_tools$all_barplots_with_numbers(
             # sample_order = params$rankname_order %||% params$sample_order, # no t necessary to pass this here
             limit = params$barplot$limit %||% c(10, 20, 30, 50),
+            collapse = collection_collapse,
             save_func = save_func,
             pstat_cutoff = plot_variant$pstat_cutoff,
             pstat_usetype = plot_variant$pstat_usetype,
@@ -624,6 +626,7 @@ run <- function(params) {
                 facet_order = NULL, # this isn't working properly
                 save_func = save_func,
                 limit = params$barplot$limit %||% c(10, 20, 30, 50),
+                collapse = collection_collapse,
                 pstat_cutoff = plot_variant$pstat_cutoff,
                 pstat_usetype = plot_variant$pstat_usetype,
                 sort_by = plot_variant$sort_by,
@@ -657,6 +660,7 @@ run <- function(params) {
           bubble_tools$all_bubble_plots(
             results_list_for_plots,
             limit = params$bubbleplot$limit,
+            collapse = collection_collapse,
             save_func = save_func,
             glyph = params$bubbleplot$glyph,
             height_scale = params$bubbleplot$advanced$height_scale,
@@ -687,6 +691,7 @@ run <- function(params) {
                 results_list_for_plots,
                 save_func = save_func,
                 limit = params$bubbleplot$limit,
+                collapse = collection_collapse,
                 glyph = params$bubbleplot$glyph,
                 height_scale = params$bubbleplot$advanced$height_scale,
                 pstat_cutoff = plot_variant$pstat_cutoff,

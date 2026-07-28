@@ -91,9 +91,13 @@ sort_by = "pval"
 
 ### params.bubbleplot.advanced
 
-- `height_scale` (float, default `0.8`): Multiplier applied to bubble plot output height.
+- `height_scale` (float, default `0.8`): Multiplier applied to bubble plot output height, subject to a 5-inch legend-safe minimum.
 - `stroke_alpha` (float, default `0.55`): Outer ring transparency (`0`–`1`).
 - `stroke_width` (float, default `0.8`): Outline width for bubble points.
+
+### Bar/bubble pathway count sidecars
+
+Enabled individual plots write `pathway_counts.json` inside each rank's bar or bubble directory. Enabled combined plots write the same schema at the collection's `bar/` or `bubble/` root with every expected rank. The top-level `n_retained_pathways` uses the same collapse and `main_pathway_ratio` logic as the corresponding plot; each canonical rank entry also includes its display label, total and main pathway counts, and strict `padj < 0.25` / `padj < 0.05` main-pathway counts. Missing FGSEA results are represented by zero-count entries. Existing sidecars are skipped unless `params.advanced.replace = true`.
 
 ## params.enplot
 
@@ -172,7 +176,7 @@ sort_by = "pval"
 
 ### Rank file helpers
 
-- `rankfiledir/names.txt` (optional): Plain text label/order file used when reading existing `.rnk` files. Each line should take the form `Display Label=canonical_file_name.rnk`. The right side resolves to the canonical `rankname`; the left side is used only as a downstream display label. Mappings are applied in file order for display ordering. Duplicate display labels are repaired with numeric suffixes and a warning. Lines starting with `#` are ignored.
+- `rankfiledir/names.txt` (optional): Plain text label/order file used when reading existing `.rnk` files. Each line should take the form `Display Label=canonical_file_name.rnk`. The right side resolves to the canonical `rankname`; the left side is used only as a downstream display label. Without this file, tackle volcano wrappers are removed automatically while the complete contrast is preserved; unrecognized names remain canonical. Mappings are applied in file order for display ordering. Duplicate display labels are repaired with numeric suffixes and a warning. Lines starting with `#` are ignored.
 
 ## params.genesets (array of tables)
 
@@ -181,6 +185,8 @@ Each entry defines a gene-set collection:
 - `category` (string)
 - `subcategory` (string)
 - `collapse` (bool)
+
+For `collapse = true`, individual barplot and bubbleplot top-N candidates are limited to rows where `mainpathway == TRUE`. Combined/faceted plots use the existing cross-comparison `main_pathway_ratio` retention logic (default `0.1`) before top-N selection, then keep that pathway's rows in every comparison facet, including facets where its row is not itself marked as a main pathway. For `collapse = false`, all rows remain eligible. This does not change enrichment-plot selection or restore collapsed `pathways_of_interest` terms.
 
 ## params.advanced
 

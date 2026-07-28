@@ -108,6 +108,8 @@ rankname_order = []
 samplename_order = []
 sample_order = []
 
+# collapse=true restricts individual bar/bubble top-N candidates to main pathways.
+# Combined plots retain selected pathways across facets using main_pathway_ratio logic.
 [[params.genesets]]
 category = "H"
 subcategory = ""

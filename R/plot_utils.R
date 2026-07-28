@@ -23,6 +23,260 @@ log_msg <- util_tools$make_partial(util_tools$log_msg)
 fgsea_tools <- new.env()
 source(file.path(src_dir, "./fgsea.R"), local = fgsea_tools)
 
+PATHWAY_COUNTS_FILENAME <- "pathway_counts.json"
+PATHWAY_COUNTS_SCHEMA_VERSION <- 1L
+
+pathway_summary_ranknames <- function(results_by_rank, rank_metadata = NULL) {
+  result_names <- names(results_by_rank)
+  result_names <- as.character(result_names[!is.na(result_names) & nzchar(result_names)])
+
+  metadata_names <- character(0)
+  if (is.data.frame(rank_metadata) && "rankname" %in% colnames(rank_metadata)) {
+    metadata_names <- as.character(rank_metadata$rankname)
+    metadata_names <- metadata_names[!is.na(metadata_names) & nzchar(metadata_names)]
+  }
+
+  unique(c(metadata_names, result_names))
+}
+
+pathway_count_statistics <- function(df) {
+  empty_counts <- list(
+    n_pathways = 0L,
+    n_main_pathways = 0L,
+    n_main_padj_lt_0_25 = 0L,
+    n_main_padj_lt_0_05 = 0L
+  )
+  if (is.null(df) || !is.data.frame(df) || !"pathway" %in% colnames(df) || nrow(df) == 0) {
+    return(empty_counts)
+  }
+
+  pathway <- as.character(df$pathway)
+  valid_pathway <- !is.na(pathway) & nzchar(pathway)
+
+  mainpathway <- if ("mainpathway" %in% colnames(df)) {
+    suppressWarnings(as.logical(df$mainpathway))
+  } else {
+    rep(TRUE, nrow(df))
+  }
+  mainpathway[is.na(mainpathway)] <- FALSE
+
+  padj <- if ("padj" %in% colnames(df)) {
+    suppressWarnings(as.numeric(df$padj))
+  } else {
+    rep(NA_real_, nrow(df))
+  }
+
+  list(
+    n_pathways = as.integer(length(unique(pathway[valid_pathway]))),
+    n_main_pathways = as.integer(length(unique(pathway[valid_pathway & mainpathway]))),
+    n_main_padj_lt_0_25 = as.integer(length(unique(
+      pathway[valid_pathway & mainpathway & !is.na(padj) & padj < 0.25]
+    ))),
+    n_main_padj_lt_0_05 = as.integer(length(unique(
+      pathway[valid_pathway & mainpathway & !is.na(padj) & padj < 0.05]
+    )))
+  )
+}
+
+.pathway_summary_frame <- function(df, rankname) {
+  if (is.null(df) || !is.data.frame(df)) {
+    return(data.frame(
+      pathway = character(),
+      padj = numeric(),
+      mainpathway = logical(),
+      rankname = character(),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  out <- df
+  if (!"pathway" %in% colnames(out)) {
+    out$pathway <- rep(NA_character_, nrow(out))
+  }
+  if (!"padj" %in% colnames(out)) {
+    out$padj <- rep(NA_real_, nrow(out))
+  }
+  if (!"mainpathway" %in% colnames(out)) {
+    out$mainpathway <- rep(TRUE, nrow(out))
+  }
+  out$rankname <- rep(rankname, nrow(out))
+  out
+}
+
+make_pathway_count_summary <- function(
+    results_by_rank,
+    rank_labels = NULL,
+    expected_ranknames = NULL,
+    collapse = FALSE,
+    combined = FALSE,
+    main_pathway_ratio = 0.1,
+    generated_at = Sys.time()) {
+  if (is.null(results_by_rank)) {
+    results_by_rank <- list()
+  }
+  if (is.null(expected_ranknames)) {
+    expected_ranknames <- names(results_by_rank)
+  }
+  expected_ranknames <- unique(as.character(expected_ranknames))
+  expected_ranknames <- expected_ranknames[
+    !is.na(expected_ranknames) & nzchar(expected_ranknames)
+  ]
+
+  rank_entries <- stats::setNames(vector("list", length(expected_ranknames)), expected_ranknames)
+  rank_frames <- stats::setNames(vector("list", length(expected_ranknames)), expected_ranknames)
+
+  for (rankname in expected_ranknames) {
+    rank_result <- if (rankname %in% names(results_by_rank)) {
+      results_by_rank[[rankname]]
+    } else {
+      NULL
+    }
+    label <- unname(rank_labels[rankname])
+    if (length(label) == 0 || is.na(label[[1]]) || !nzchar(as.character(label[[1]]))) {
+      label <- rankname
+    } else {
+      label <- as.character(label[[1]])
+    }
+
+    rank_entries[[rankname]] <- c(
+      list(label = label),
+      pathway_count_statistics(rank_result)
+    )
+    rank_frames[[rankname]] <- .pathway_summary_frame(rank_result, rankname)
+  }
+
+  retained_df <- if (length(rank_frames) == 0) {
+    .pathway_summary_frame(NULL, "")
+  } else if (isTRUE(combined)) {
+    combined_df <- dplyr::bind_rows(rank_frames)
+    fgsea_tools$filter_plot_candidates(
+      combined_df,
+      collapse = collapse,
+      combined = TRUE,
+      main_pathway_ratio = main_pathway_ratio
+    )
+  } else {
+    rank_frames %>%
+      purrr::map(~ fgsea_tools$filter_plot_candidates(
+        .x,
+        collapse = collapse,
+        combined = FALSE
+      )) %>%
+      dplyr::bind_rows()
+  }
+
+  retained_pathways <- if ("pathway" %in% colnames(retained_df)) {
+    pathway <- as.character(retained_df$pathway)
+    unique(pathway[!is.na(pathway) & nzchar(pathway)])
+  } else {
+    character(0)
+  }
+
+  generated_at <- if (inherits(generated_at, "POSIXt")) {
+    format(generated_at, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+  } else {
+    as.character(generated_at[[1]])
+  }
+
+  list(
+    statistics = list(
+      n_retained_pathways = as.integer(length(retained_pathways)),
+      ranks = rank_entries
+    ),
+    schema_version = PATHWAY_COUNTS_SCHEMA_VERSION,
+    generated_at = generated_at
+  )
+}
+
+write_pathway_count_summary <- function(
+    summary,
+    path,
+    replace = TRUE,
+    filename = PATHWAY_COUNTS_FILENAME) {
+  target <- file.path(path, filename)
+  if (fs::file_exists(target) && !isTRUE(replace)) {
+    log_msg(msg = paste0("pathway counts: skipping existing file ", target))
+    return(invisible(target))
+  }
+
+  fs::dir_create(path, recurse = TRUE)
+  jsonlite::write_json(
+    summary,
+    target,
+    pretty = TRUE,
+    auto_unbox = TRUE,
+    null = "null",
+    na = "null"
+  )
+  log_msg(msg = paste0("pathway counts: wrote ", target))
+  invisible(target)
+}
+
+write_pathway_count_sidecars <- function(
+    results_by_rank,
+    output_root,
+    rank_labels = NULL,
+    expected_ranknames = NULL,
+    collapse = FALSE,
+    combined = FALSE,
+    main_pathway_ratio = 0.1,
+    replace = TRUE) {
+  if (is.null(output_root) || length(output_root) == 0 || !nzchar(output_root[[1]])) {
+    return(invisible(character(0)))
+  }
+  if (is.null(expected_ranknames)) {
+    expected_ranknames <- names(results_by_rank)
+  }
+  expected_ranknames <- unique(as.character(expected_ranknames))
+  expected_ranknames <- expected_ranknames[
+    !is.na(expected_ranknames) & nzchar(expected_ranknames)
+  ]
+
+  if (isTRUE(combined)) {
+    summary <- make_pathway_count_summary(
+      results_by_rank = results_by_rank,
+      rank_labels = rank_labels,
+      expected_ranknames = expected_ranknames,
+      collapse = collapse,
+      combined = TRUE,
+      main_pathway_ratio = main_pathway_ratio
+    )
+    return(write_pathway_count_summary(summary, output_root, replace = replace))
+  }
+
+  targets <- stats::setNames(character(length(expected_ranknames)), expected_ranknames)
+  for (rankname in expected_ranknames) {
+    label <- unname(rank_labels[rankname])
+    if (length(label) == 0 || is.na(label[[1]]) || !nzchar(as.character(label[[1]]))) {
+      label <- rankname
+    }
+    rank_result <- if (rankname %in% names(results_by_rank)) {
+      results_by_rank[[rankname]]
+    } else {
+      NULL
+    }
+    one_result <- stats::setNames(list(rank_result), rankname)
+    summary <- make_pathway_count_summary(
+      results_by_rank = one_result,
+      rank_labels = rank_labels,
+      expected_ranknames = rankname,
+      collapse = collapse,
+      combined = FALSE,
+      main_pathway_ratio = main_pathway_ratio
+    )
+    rank_dir <- util_tools$safe_subdir(
+      output_root,
+      util_tools$safe_path_component(label)
+    )
+    targets[[rankname]] <- write_pathway_count_summary(
+      summary,
+      rank_dir,
+      replace = replace
+    )
+  }
+  invisible(targets)
+}
+
 # moved to utils.R
 # # Helper function to get current preset arguments or an empty list if none are set
 # get_args <- function(f) {

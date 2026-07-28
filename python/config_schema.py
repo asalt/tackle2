@@ -191,7 +191,11 @@ class BubbleplotAdvanced(ConfigSection):
     __fields__ = {
         "stroke_width": FieldMeta(float, 0.8, "Outline width for bubble markers."),
         "stroke_alpha": FieldMeta(float, 0.55, "Outline transparency (0-1)."),
-        "height_scale": FieldMeta(float, 0.8, "Multiplier applied to bubble plot output height."),
+        "height_scale": FieldMeta(
+            float,
+            0.8,
+            "Multiplier applied to bubble plot output height, subject to a 5-inch legend-safe minimum.",
+        ),
     }
 
 
@@ -396,7 +400,11 @@ class ParamsConfig(ConfigSection):
         "zscore_emat": FieldMeta(bool, True, "Whether to z-score the expression matrix."),
         "zscore_emat_groupby": FieldMeta(Union[str, bool], False, "Metadata column to group by during z-score normalisation (or false)."),
         "cut_by": FieldMeta(str, "group", "Metadata column used to facet plots."),
-        "genesets": FieldMeta(List[Dict[str, Any]], _default_genesets, "Array of gene-set selections (category/subcategory/collapse)."),
+        "genesets": FieldMeta(
+            List[Dict[str, Any]],
+            _default_genesets,
+            "Gene-set selections; collapse controls redundancy-aware individual and combined bar/bubble selection.",
+        ),
     }
 
     __subsections__ = {

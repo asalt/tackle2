@@ -62,6 +62,7 @@ The order in which comparisons appear determines how combined plots, heatmaps, a
 
     - The right side references the canonical rank filename (with optional `.rnk` suffix).
     - The left side becomes the downstream display label; it does not rename `rankname` internally.
+    - Without `names.txt`, tackle volcano wrappers are removed automatically while the complete contrast is preserved. Unrecognized names remain canonical.
     - Mappings are applied from top to bottom as display order. Duplicate labels are repaired with numeric suffixes and a warning. Lines starting with `#` are treated as comments.
 
 When a GCT file is supplied, column metadata (`gct@cdesc`) is leveraged for group annotations. If `rankname_order` lines up with the `group` column, those factors are re-leveled to match your configuration; otherwise, the pipeline falls back to the natural order of the rank files. For volcano-only runs, you can still steer ordering with canonical `rankname_order` or the row order in `names.txt`, even though no additional metadata is attached.
@@ -166,8 +167,11 @@ Execution performed by `run_one` wrapper around `fgsea::fgsea`.
 Also has an option to "collapse" pathways to reduce redundancy.
 This is performed with `fgsea::collapsePathways`.
 No filtering is performed at this stage; if `collapse == TRUE` redundant pathways will be calculated and indicated.
+Downstream individual barplot and bubbleplot top-N selection then considers only rows marked `mainpathway == TRUE` for collapsed collections. Combined/faceted barplots and bubbleplots instead apply the existing cross-comparison `filter_on_mainpathway()` retention rule before top-N selection, preserving every comparison row for a retained pathway. Collections with `collapse == FALSE` keep every row eligible. Enrichment-plot routing is unchanged.
 
 ### plot.R
+
+Barplot and bubbleplot output directories include a pretty-printed `pathway_counts.json` sidecar. Individual rank directories contain one canonical rank entry, while the combined `bar/` and `bubble/` roots contain every expected rank plus the cross-comparison `n_retained_pathways` count that sets the unscreened top-N ceiling. Each rank reports total pathways, main pathways, and main pathways with `padj < 0.25` or `padj < 0.05`. Ranks with no FGSEA result are recorded with zero counts, so a summary can exist even when no PDF is available. These files follow `params.advanced.replace`.
 
 
 ### Custom Colormap (Annotations)
