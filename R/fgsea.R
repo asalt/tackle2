@@ -80,6 +80,33 @@ filter_on_mainpathway <- function(
   return(res)
 }
 
+filter_plot_candidates <- function(
+    pathway_object,
+    collapse = FALSE,
+    combined = FALSE,
+    main_pathway_ratio = .1) {
+  collapse_enabled <- length(collapse) > 0 &&
+    isTRUE(as.logical(collapse[[1]]))
+  if (!collapse_enabled) {
+    return(pathway_object)
+  }
+
+  if (isTRUE(combined)) {
+    # Decide retention by pathway across comparisons, then keep every facet row.
+    return(filter_on_mainpathway(
+      pathway_object,
+      main_pathway_ratio = main_pathway_ratio
+    ))
+  }
+
+  if (!"mainpathway" %in% colnames(pathway_object)) {
+    pathway_object$mainpathway <- TRUE
+  }
+  keep <- suppressWarnings(as.logical(pathway_object$mainpathway))
+  keep[is.na(keep)] <- FALSE
+  pathway_object[keep, , drop = FALSE]
+}
+
 .safe_ratio <- function(numerator, denominator) {
   numerator <- suppressWarnings(as.numeric(numerator)[1])
   denominator <- suppressWarnings(as.numeric(denominator)[1])
@@ -392,6 +419,19 @@ run_one <- function(
     }
   )
   if (is.null(fgseaRes)) {
+    return(NULL)
+  }
+  if (nrow(fgseaRes) == 0) {
+    rank_label <- if (!is.null(rank_name) && length(rank_name) > 0 && !is.na(rank_name[[1]]) && nzchar(as.character(rank_name[[1]]))) {
+      as.character(rank_name[[1]])
+    } else {
+      "unnamed rank"
+    }
+    logger(warning = paste0(
+      "fgsea returned zero pathways for rank ",
+      rank_label,
+      "; check species, gene identifiers, and minSize/maxSize overlap"
+    ))
     return(NULL)
   }
 

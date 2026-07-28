@@ -97,6 +97,27 @@ test_that("test fgsea runone", {
   )
 })
 
+test_that("run_one returns NULL when fgsea has no overlapping pathways", {
+  warnings <- character(0)
+  logger <- function(msg = NULL, warning = NULL, ...) {
+    if (!is.null(warning)) warnings <<- c(warnings, warning)
+  }
+
+  res <- suppressWarnings(fgsea_tools$run_one(
+    rankobj = stats::setNames(c(1, 2, 3), c("A", "B", "C")),
+    geneset = list(no_overlap = c("X", "Y", "Z")),
+    rank_name = "sample_A",
+    minSize = 1,
+    maxSize = 10,
+    collapse = FALSE,
+    logger = logger
+  ))
+
+  expect_null(res)
+  expect_true(any(grepl("zero pathways", warnings)))
+  expect_true(any(grepl("sample_A", warnings)))
+})
+
 test_that("rank vector sanitizer removes unusable stats deterministically", {
   warnings <- character(0)
   logger <- function(msg = NULL, warning = NULL, ...) {
