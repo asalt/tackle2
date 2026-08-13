@@ -30,14 +30,17 @@ $ tackle2 describe params.bubbleplot --json
 
 - `ranks_from` (string, default `""`): Data source, `"volcano"`, `"gct"`, or `"model"`.
 - `savedir` (string, default `./plots`): Root output directory (resolved relative to run cwd).
-- `volcanodir` (string): Folder containing volcano TSV files (required when `ranks_from = "volcano"`).
+- `volcanodir` (string or array of strings): One or more folders containing volcano TSV files (required only when `ranks_from = "volcano"`).
 - `rankfiledir` (string, default `"savedir"`): Where generated rank files are written; special value `"savedir"` puts them under `savedir/ranks`.
-- `gct_path` (string): Path to GCT file (required when `ranks_from = "gct"`).
+- `gct_path` (string): Path to the expression GCT file (required when `ranks_from = "gct"` or `"model"`).
 - `model_file` (string, default `""`): Path to a TOML file containing a `[model]` table (optional helper when `ranks_from = "model"`).
 - `species` (string, default `"Homo sapiens"`): Species name passed to msigdbr.
 - `zscore_emat` (bool, default `true`): Z-score expression matrix before analysis.
 - `zscore_emat_groupby` (string/bool, default `false`): Grouping column for Z-score normalisation.
 - `cut_by` (string, default `"group"`): Metadata column controlling chart faceting.
+- `pathways_of_interest` (array of strings, default `[]`): Additional pathway names to include in enrichment-plot selection when they are present in the analyzed collection.
+
+Input-path validation follows `ranks_from`: unused blank paths are ignored, so expression-based GCT/ssGSEA runs do not require `volcanodir`.
   
 ### params.model
 

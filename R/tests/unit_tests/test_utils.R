@@ -315,6 +315,74 @@ testthat::test_that("clean_args resolves savedir logfile sentinel", {
   )
 })
 
+testthat::test_that("clean_args path resolution is normalized and idempotent", {
+  root_dir <- file.path(tempdir(), "project")
+  params <- list(
+    savedir = "./results",
+    rankfiledir = "savedir",
+    advanced = list(logfile = "savedir", cachedir = "savedir"),
+    db = list(path = "savedir"),
+    genesets = list(list(category = "H", subcategory = "", collapse = FALSE))
+  )
+
+  first <- util_tools$clean_args(params, root_dir = root_dir)
+  second <- util_tools$clean_args(first)
+  expected_savedir <- file.path(root_dir, "results")
+
+  testthat::expect_equal(first$savedir, expected_savedir)
+  testthat::expect_equal(second$savedir, expected_savedir)
+  testthat::expect_equal(second$rankfiledir, first$rankfiledir)
+  testthat::expect_equal(second$db$path, first$db$path)
+  testthat::expect_equal(second$advanced$logfile, first$advanced$logfile)
+  testthat::expect_equal(second$advanced$cachedir, first$advanced$cachedir)
+  testthat::expect_equal(second$models, first$models)
+  testthat::expect_false(grepl("/\\./|^//", second$savedir))
+
+  if (.Platform$OS.type != "windows") {
+    testthat::expect_equal(
+      util_tools$resolve_config_path("///home/alex/./results", root_dir = "/"),
+      "/home/alex/results"
+    )
+  }
+})
+
+testthat::test_that("clean_args validates only the selected rank source", {
+  root_dir <- withr::local_tempdir()
+  gct_path <- file.path(root_dir, "expression.gct")
+  writeLines("#1.3", gct_path)
+
+  gct_params <- list(
+    ranks_from = "gct",
+    savedir = "results",
+    volcanodir = "",
+    gct_path = "expression.gct"
+  )
+  cleaned <- util_tools$clean_args(gct_params, root_dir = root_dir)
+
+  testthat::expect_null(cleaned$volcanodir)
+  testthat::expect_equal(cleaned$gct_path, gct_path)
+
+  gct_params$volcanodir <- "unused-missing-volcano"
+  testthat::expect_no_error(
+    util_tools$clean_args(gct_params, root_dir = root_dir)
+  )
+
+  testthat::expect_error(
+    util_tools$clean_args(
+      list(ranks_from = "volcano", savedir = "results", volcanodir = ""),
+      root_dir = root_dir
+    ),
+    "volcanodir must be provided"
+  )
+  testthat::expect_error(
+    util_tools$clean_args(
+      list(ranks_from = "gct", savedir = "results", gct_path = ""),
+      root_dir = root_dir
+    ),
+    "gct_path must be provided"
+  )
+})
+
 # logging
 
 testthat::test_that("test log msg", {

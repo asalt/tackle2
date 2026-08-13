@@ -1,15 +1,16 @@
 [params]
 ranks_from = ""  # choices are volcano, gct, or model. must specify this
 savedir = '' # this is the base directory all results will be saved within. paths are relative from where program is executed
-volcanodir = '' # use single quote for specifying paths
+volcanodir = '' # one path, or an array of paths, used when ranks_from = "volcano"
 rankfiledir = "savedir" # "savedir" special character string indicating to save rankfiles within the specified savedir
-gct_path = ''
+gct_path = '' # expression matrix used when ranks_from = "gct" or "model"
 model_file = ""  # optional external TOML file containing a [model] block when ranks_from = "model"
 models = []  # optional inline array of model definitions when running multiple limma models
 species = "Homo sapiens"  # Mus musculus, ..
 zscore_emat = true
 zscore_emat_groupby = false # change this to a metadata variable to zscore within. otherwise leave false
 cut_by = "group"
+pathways_of_interest = []
 
 [params.barplot]
 limit = [12, 20, 32]

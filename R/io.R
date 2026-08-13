@@ -560,15 +560,22 @@ create_rnkfiles_from_volcano <- function(
     volcanodir = "./",
     id_col = "GeneID",
     value_col = "value") {
-  if (is.null(volcanodir)) {
+  volcanodirs <- unique(as.character(unlist(volcanodir, use.names = FALSE)))
+  volcanodirs <- volcanodirs[!is.na(volcanodirs) & nzchar(volcanodirs)]
+
+  if (length(volcanodirs) == 0) {
     stop("volcanodir not defined")
   }
 
-  if (!fs::dir_exists(volcanodir)) {
-    stop("volcanodir does not exist")
+  missing_dirs <- volcanodirs[!fs::dir_exists(volcanodirs)]
+  if (length(missing_dirs) > 0) {
+    stop(paste0("volcanodir does not exist: ", paste(missing_dirs, collapse = ", ")))
   }
 
-  (volcanofiles <- fs::dir_ls(path = volcanodir, regexp = ".*tsv", recurse = TRUE))
+  volcanofiles <- volcanodirs %>%
+    purrr::map(~ fs::dir_ls(path = .x, regexp = ".*tsv", recurse = TRUE)) %>%
+    unlist(use.names = FALSE) %>%
+    unique()
   log_msg(msg = paste0("Found ", length(volcanofiles), " tsv files"))
   log_msg(msg = paste(volcanofiles, collapse = "\n"))
 
@@ -991,8 +998,8 @@ load_and_process_rank_inputs <- function(params) {
     ))
   }
   if (ranks_from == "volcano") {
-    if (is.null(volcanodir) || !file.exists(volcanodir)) {
-      stop(paste0("improper volcanodir specification: ", volcanodir))
+    if (is.null(volcanodir) || length(volcanodir) == 0 || any(!file.exists(volcanodir))) {
+      stop(paste0("improper volcanodir specification: ", paste(volcanodir, collapse = ", ")))
     }
     log_msg(msg = "saving rankfiles from volcano output. using signedlogp as value")
     rnkdfs <- create_rnkfiles_from_volcano(volcanodir, value_col = "signedlogP")

@@ -76,6 +76,28 @@ test_that("create_rnkfiles_from_volcano processes files correctly", {
   })
 })
 
+test_that("create_rnkfiles_from_volcano accepts multiple directories", {
+  withr::with_tempdir({
+    fs::dir_create(c("volcano_a", "volcano_b"))
+    write_lines(
+      "GeneID\tsignedlogP\nGene1\t0.5\nGene2\t-1.2",
+      "volcano_a/contrast_a.tsv"
+    )
+    write_lines(
+      "GeneID\tsignedlogP\nGene3\t1.5\nGene4\t-0.3",
+      "volcano_b/contrast_b.tsv"
+    )
+
+    result <- io_tools$create_rnkfiles_from_volcano(
+      c("volcano_a", "volcano_b"),
+      value_col = "signedlogP"
+    )
+
+    expect_setequal(names(result), c("contrast_a", "contrast_b"))
+    expect_equal(length(result), 2)
+  })
+})
+
 test_that("rank names strip known rank source extensions only", {
   expect_equal(
     io_tools$normalize_rank_names(c(

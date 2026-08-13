@@ -251,7 +251,7 @@ log_msg(paste0("ranks from: ", ranks_from))
 if (!exists("TESTING")) TESTING <- FALSE
 
 
-if ((!is.null(volcanodir) && !file.exists(volcanodir)) &&
+if ((!is.null(volcanodir) && any(!file.exists(volcanodir))) &&
   (!is.null(gct_path) && !file.exists(gct_path)) &&
   (!is.null(rankfiledir) && !file.exists(rankfiledir)) &&
   (!TESTING == TRUE)) {
@@ -288,7 +288,7 @@ load_and_process_ranks <- function(params) {
     } # exit and we're done
     log_msg(msg = "couldn't find any rnkfiles")
     if (ranks_from == "volcano") {
-      if (is.null(volcanodir) || !file.exists(volcanodir)) {
+      if (is.null(volcanodir) || length(volcanodir) == 0 || any(!file.exists(volcanodir))) {
         stop("improper volcanodir specification")
       }
       log_msg(msg="saving rankfiles from volcano output. using signedlogp as value")

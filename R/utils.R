@@ -209,6 +209,28 @@ is_absolute_path <- function(path) {
   grepl(paste0("^", normalizePath(root_dir)), normalizePath(path))
 }
 
+resolve_config_path <- function(path, root_dir = ".") {
+  if (is.null(path) || length(path) == 0 || is.na(path[[1]]) || !nzchar(path[[1]])) {
+    return(path)
+  }
+
+  root_dir <- path.expand(as.character(root_dir[[1]]))
+  if (!fs::is_absolute_path(root_dir)) {
+    root_dir <- fs::path_abs(root_dir)
+  }
+  path <- path.expand(as.character(path[[1]]))
+  if (!fs::is_absolute_path(path)) {
+    path <- fs::path(root_dir, path)
+  }
+  path <- as.character(fs::path_norm(path))
+
+  # POSIX permits multiple leading slashes, but they make logs needlessly noisy.
+  if (.Platform$OS.type != "windows") {
+    path <- sub("^/+", "/", path)
+  }
+  path
+}
+
 clean_args <- function(params, root_dir = "/") {
   # would be best for root_dir to be explicitly specified, which it is elsewhere
 
@@ -222,7 +244,10 @@ clean_args <- function(params, root_dir = "/") {
   if (is.null(params$savedir)) {
     params$savedir <- file.path("./plots")
   }
-  params$savedir <- file.path(root_dir, (params$savedir %||% file.path("./plots")))
+  params$savedir <- resolve_config_path(
+    params$savedir %||% file.path("./plots"),
+    root_dir = root_dir
+  )
 
   params$advanced$quiet <- normalize_bool(params$advanced$quiet %||% FALSE)
   if (!is.null(params$advanced$verbose)) {
@@ -427,19 +452,63 @@ clean_args <- function(params, root_dir = "/") {
   params$umap_gene$variants <- normalized_variants
 
 
-  if (!is.null(params$volcanodir)) {
-    params$volcanodir <- file.path(root_dir, params$volcanodir)
-    if (!file.exists(params$volcanodir)) stop(paste0("volcanodir does not exist: ", params$volcanodir))
-  }
-
-  if (!is.null(params$gct_path) && params$gct_path != "") {
-    params$gct_path <- file.path(root_dir, params$gct_path)
+  rank_source <- params$ranks_from %||% ""
+  rank_source <- if (length(rank_source) > 0) {
+    tolower(trimws(as.character(rank_source[[1]])))
   } else {
-    params$gct_path <- NULL
+    ""
+  }
+  params$ranks_from <- rank_source
+
+  volcanodirs <- as.character(unlist(params$volcanodir %||% character(0), use.names = FALSE))
+  volcanodirs <- trimws(volcanodirs)
+  volcanodirs <- volcanodirs[!is.na(volcanodirs) & nzchar(volcanodirs)]
+  if (length(volcanodirs) > 0) {
+    volcanodirs <- vapply(
+      volcanodirs,
+      resolve_config_path,
+      character(1),
+      root_dir = root_dir,
+      USE.NAMES = FALSE
+    )
+    params$volcanodir <- unique(volcanodirs)
+  } else {
+    params$volcanodir <- NULL
   }
 
-  if (!is.null(params$gct_path) && !file.exists(params$gct_path)) {
-    stop(paste0(params$gct_path, " does not exist, exiting.."))
+  # Validate only the configured rank source; unused input fields are optional.
+  if (identical(rank_source, "volcano")) {
+    if (is.null(params$volcanodir)) {
+      stop("params$volcanodir must be provided when ranks_from = 'volcano'")
+    }
+    missing_volcanodirs <- params$volcanodir[!fs::dir_exists(params$volcanodir)]
+    if (length(missing_volcanodirs) > 0) {
+      stop(paste0(
+        "volcanodir does not exist: ",
+        paste(missing_volcanodirs, collapse = ", ")
+      ))
+    }
+  }
+
+  gct_paths <- as.character(unlist(params$gct_path %||% character(0), use.names = FALSE))
+  gct_paths <- trimws(gct_paths)
+  gct_paths <- gct_paths[!is.na(gct_paths) & nzchar(gct_paths)]
+  if (length(gct_paths) > 1) {
+    stop("params$gct_path must be a single file path")
+  }
+  params$gct_path <- if (length(gct_paths) == 1) {
+    resolve_config_path(gct_paths[[1]], root_dir = root_dir)
+  } else {
+    NULL
+  }
+
+  if (rank_source %in% c("gct", "model")) {
+    if (is.null(params$gct_path)) {
+      stop(paste0("params$gct_path must be provided when ranks_from = '", rank_source, "'"))
+    }
+    if (!fs::file_exists(params$gct_path)) {
+      stop(paste0(params$gct_path, " does not exist, exiting.."))
+    }
   }
 
   params$model_file <- params$model_file %||% ""
@@ -456,10 +525,14 @@ clean_args <- function(params, root_dir = "/") {
   # Normalize several ways the config can provide model definitions (single model,
   # list of models, or nothing) into a single list we can iterate.
   raw_models <- list()
-  if (!is.null(params$model) && length(params$model) > 0) {
+  has_model <- !is.null(params$model) && length(params$model) > 0
+  has_models <- !is.null(params$models) && length(params$models) > 0
+  model_already_in_models <- has_model && has_models &&
+    identical(params$model, params$models[[1]])
+  if (has_model && !model_already_in_models) {
     raw_models <- c(raw_models, list(params$model))
   }
-  if (!is.null(params$models) && length(params$models) > 0) {
+  if (has_models) {
     if (!is.list(params$models)) {
       stop("params$models must be a list of model definitions")
     }
@@ -488,7 +561,7 @@ clean_args <- function(params, root_dir = "/") {
 
     spec_model_file <- spec$model_file %||% global_model_file
     if (!is.null(spec_model_file) && nzchar(spec_model_file)) {
-      model_path <- file.path(root_dir, spec_model_file)
+      model_path <- resolve_config_path(spec_model_file, root_dir = root_dir)
       file_model <- load_model_spec(model_path)
       spec <- modifyList(file_model %||% list(), spec)
       spec$model_file <- model_path
@@ -511,7 +584,7 @@ clean_args <- function(params, root_dir = "/") {
   params$models <- normalized_models
   params$model <- normalized_models[[1]]
   if (!is.null(global_model_file) && nzchar(global_model_file)) {
-    params$model_file <- file.path(root_dir, global_model_file)
+    params$model_file <- resolve_config_path(global_model_file, root_dir = root_dir)
   } else {
     params$model_file <- NULL
   }
@@ -535,7 +608,7 @@ clean_args <- function(params, root_dir = "/") {
     if (db_path == "savedir" || db_path == "") {
       db_path <- file.path(params$savedir, "gsea_results.sqlite")
     } else {
-      db_path <- file.path(root_dir, db_path)
+      db_path <- resolve_config_path(db_path, root_dir = root_dir)
     }
   }
   params$db$path <- db_path
@@ -546,7 +619,7 @@ clean_args <- function(params, root_dir = "/") {
     if (params$rankfiledir == "savedir" || params$rankfiledir == "") {
       params$rankfiledir <- file.path(params$savedir, "ranks")
     } else {
-      params$rankfiledir <- file.path(root_dir, params$rankfiledir)
+      params$rankfiledir <- resolve_config_path(params$rankfiledir, root_dir = root_dir)
     }
   } else {
       params$rankfiledir <- file.path(params$savedir, "ranks")
@@ -602,7 +675,7 @@ clean_args <- function(params, root_dir = "/") {
   user_cmap_path <- params$extra$colormap_file %||% params$extra$cmap_file %||%
     params$advanced$colormap_file %||% params$advanced$cmap_file
   if (!is.null(user_cmap_path) && nzchar(user_cmap_path)) {
-    full_cmap_path <- file.path(root_dir, user_cmap_path)
+    full_cmap_path <- resolve_config_path(user_cmap_path, root_dir = root_dir)
     if (file.exists(full_cmap_path)) {
       cmap <- load_user_colormap(full_cmap_path)
       if (!is.null(cmap)) {
