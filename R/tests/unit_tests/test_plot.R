@@ -369,6 +369,45 @@ test_that("enrichplot skips missing pathway-rank stats rows before dplyr filteri
   expect_null(plts$ONLY_PATHWAY$sample_B)
 })
 
+test_that("combined enrichplots use a bottom legend instead of curve labels", {
+  canonical_ranknames <- c(
+    "RUN_A4B8_20260714_nz2_dir_B_fna_T_group_groupIR_left_minus_groupnone_pre_imv_T_med",
+    "RUN_A4B8_20260714_nz2_dir_B_fna_T_group_groupIR_right_minus_groupnone_pre_imv_T_med"
+  )
+  curve <- tidyr::expand_grid(
+    rankname = canonical_ranknames,
+    rank = seq_len(4)
+  ) %>%
+    dplyr::mutate(
+      ES = c(0, 0.4, 0.2, 0, 0, -0.3, -0.1, 0)
+    )
+  ticks <- curve %>% dplyr::filter(.data$rank %in% c(2, 3))
+  enplot_data <- plot_tools$apply_rank_labels_to_rankorder(
+    list(curve = curve, ticks = ticks)
+  )
+
+  plt <- plot_tools$plotES_combined(
+    enplot_data,
+    title = "TEST PATHWAY"
+  )
+  geom_classes <- vapply(
+    plt$layers,
+    function(layer) class(layer$geom)[[1]],
+    character(1)
+  )
+  line_layer <- which(geom_classes == "GeomLine")
+
+  expect_equal(
+    unique(enplot_data$curve$rankname),
+    c("groupIR_left_minus_groupnone_pre", "groupIR_right_minus_groupnone_pre")
+  )
+  expect_equal(plt$theme$legend.position, "bottom")
+  expect_false(any(geom_classes %in% c("GeomLabelRepel", "GeomTextRepel")))
+  expect_length(line_layer, 1)
+  expect_equal(plt$layers[[line_layer]]$aes_params$linewidth, 0.8)
+  expect_true(isTRUE(plt$layers[[line_layer]]$show.legend))
+})
+
 
 test_that("test plot a single barplot", {
   plt <- TEST_DATA$H_[[1]] %>%

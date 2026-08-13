@@ -242,10 +242,33 @@ test_that("faceted barplot sizing grows more slowly for many pathways", {
 
   expect_true(any(grepl("\n", as.character(plt$data$pathway), fixed = TRUE)))
   expect_lte(plot_tools$max_wrapped_label_lines(unique(plt$data$pathway)), 2)
-  expect_lt(plt$theme$axis.text.y$size, 5)
+  expect_lte(plt$theme$axis.text.y$size, 5.6)
   expect_lt(bar_text_layer_size(plt), 2.2)
   expect_lt(saved_dims[["height"]], 16)
   expect_gt(saved_dims[["height"]], 7)
+})
+
+test_that("two-facet barplot overviews retain readable row height", {
+  saved_heights <- numeric(0)
+  fake_save <- function(plot_code, width = NULL, height = NULL, ...) {
+    saved_heights <<- c(saved_heights, height)
+    TRUE
+  }
+
+  plot_tools$barplot_with_numbers(
+    make_many_faceted_bar_df(n_pathways = 12, n_facets = 2),
+    save_func = fake_save,
+    title = "top 12 overview"
+  )
+  plot_tools$barplot_with_numbers(
+    make_many_faceted_bar_df(n_pathways = 32, n_facets = 2),
+    save_func = fake_save,
+    title = "top 32 overview"
+  )
+
+  expect_gte(saved_heights[[1]], 3.0)
+  expect_gt(saved_heights[[2]], 5.3)
+  expect_lt(saved_heights[[2]], 7.0)
 })
 
 test_that("faceted barplot typography stays unchanged when rows have room", {

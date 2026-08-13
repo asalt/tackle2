@@ -811,9 +811,6 @@ apply_rank_labels_to_df <- function(df, rank_metadata = NULL) {
 }
 
 apply_rank_labels_to_rankorder <- function(rankorder, rank_metadata = NULL) {
-  if (!has_explicit_rank_labels(rank_metadata)) {
-    return(rankorder)
-  }
   rankorder$curve <- apply_rank_labels_to_df(rankorder$curve, rank_metadata)
   rankorder$edge <- apply_rank_labels_to_df(rankorder$edge, rank_metadata)
   rankorder$ticks <- apply_rank_labels_to_df(rankorder$ticks, rank_metadata)
@@ -1082,12 +1079,12 @@ barplot_with_numbers <- function(
   text_scale <- axis_text_y_size / 6.6
   if (is_faceted_input) {
     per_row_in <- dplyr::case_when(
-      n_pathways <= 20 ~ 0.20,
-      n_pathways <= 60 ~ 0.145,
-      TRUE ~ 0.12
+      n_pathways <= 20 ~ 0.23,
+      n_pathways <= 60 ~ 0.175,
+      TRUE ~ 0.145
     ) * text_scale
-    per_row_in <- max(min(per_row_in, 0.24), 0.10)
-    min_panel_height_in <- 2.6
+    per_row_in <- max(min(per_row_in, 0.27), 0.12)
+    min_panel_height_in <- 3.0
     facet_strip_pad_in <- 0.30
   } else {
     per_row_in <- dplyr::case_when(
@@ -2321,7 +2318,10 @@ plot_top_ES <- function(
         .ncol <- ceiling(sqrt(num_panels)) # ggplot2 default behavior if ncol is not specified
         .nrow <- ceiling(num_panels / .ncol) # Calculate rows
         .width <- panel_width * .ncol
-        .height <- panel_height * .8 * .nrow
+        n_ranknames <- max(dplyr::n_distinct(rankorder$edge$rankname), 1L)
+        legend_rows <- ceiling(n_ranknames / 2)
+        legend_height <- min(1.5, 0.22 * legend_rows)
+        .height <- panel_height * .8 * .nrow + legend_height
 
         save_func <- make_partial(save_func, path = newpath, filename = newfilename, width = .width, height = .height)
         # and now call it
@@ -2407,22 +2407,32 @@ plotES_combined <- function(enplot_data, label_size = 1.85, title = "", show_tic
   # look at add_color_mappings and similar called from combine_rankorders_on_sample for color assignments
   curve <- enplot_data$curve
   ticks <- enplot_data$ticks
+  ranknames <- unique(as.character(curve$rankname))
+  rank_colors <- stats::setNames(
+    colorspace::qualitative_hcl(length(ranknames), palette = "Dark 3"),
+    ranknames
+  )
+  legend_text_size <- max(7, label_size * 2.8)
   p <- ggplot(data = curve) +
-    geom_line(aes(x = rank, y = ES, color = rankname), alpha = .6, show.legend = F) +
-    geom_hline(yintercept = 0, colour = "black") +
-    geom_label_repel(
-      data = curve %>% group_by(rankname) %>% arrange(-abs(ES)) %>% slice_head(n = 1) %>% ungroup(),
-      # what is this doing? above?
-      aes(label = format_display_label(rankname, wrap_width = 28),
-        x = rank, y = ES, color = rankname),
-      # nudge_x = 0.5,
-      # nudge_y = 0.5,
-      size = label_size,
-      show.legend = FALSE,
-      max.overlaps = Inf,
-      fill = "#FFFFFFcc",
-      #xlim = c(-Inf, Inf), ylim = c(-Inf, Inf) # experimental
-
+    geom_line(
+      aes(x = rank, y = ES, color = rankname),
+      alpha = .85,
+      linewidth = .8,
+      lineend = "round",
+      show.legend = TRUE
+    ) +
+    geom_hline(yintercept = 0, colour = "black", linewidth = .35) +
+    scale_color_manual(
+      values = rank_colors,
+      labels = function(values) format_display_label(values, wrap_width = 32)
+    ) +
+    guides(
+      color = guide_legend(
+        title = NULL,
+        ncol = 2,
+        byrow = TRUE,
+        override.aes = list(alpha = 1, linewidth = 1.1)
+      )
     )
   if (show_ticks == TRUE) {
     p <- p + geom_segment(
@@ -2439,8 +2449,14 @@ plotES_combined <- function(enplot_data, label_size = 1.85, title = "", show_tic
   p <- p + theme(
     panel.background = element_blank(),
     panel.grid.major = element_line(color = "grey92"),
-    title = element_text(size = 8),
-    subtitle = element_text(size = 5)
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(size = 8),
+    plot.subtitle = element_text(size = 5),
+    legend.position = "bottom",
+    legend.justification = "left",
+    legend.text = element_text(size = legend_text_size, lineheight = .9),
+    legend.key.width = grid::unit(.55, "in"),
+    legend.spacing.y = grid::unit(.05, "in")
   ) +
     labs(x = "rank", y = "enrichment score", title = title)
   if ("facet" %in% names(enplot_data$curve)) {
