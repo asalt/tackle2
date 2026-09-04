@@ -228,7 +228,8 @@ class HeatmapGSEAConfig(ConfigSection):
         "cut_by": FieldMeta(Union[str, bool], False, "Metadata column for grouping (or false)."),
         "cluster_rows": FieldMeta(bool, True, "Cluster rows in heatmaps."),
         "cluster_columns": FieldMeta(List[bool], lambda: [False, True], "Cluster columns flags [individual, combined]."),
-        "legend_include": FieldMeta(List[str], list, "Metadata columns to include in heatmap legends."),
+        "legend_include": FieldMeta(List[str], list, "Non-empty allowlist of metadata columns for heatmap annotations."),
+        "legend_exclude": FieldMeta(List[str], list, "Metadata columns to exclude from heatmap annotations."),
     }
 
 
@@ -238,6 +239,8 @@ class HeatmapGeneConfig(ConfigSection):
     __fields__ = {
         "do": FieldMeta(bool, True, "Render gene-level heatmaps."),
         "limit": FieldMeta(int, 10, "Top-N genes per heatmap."),
+        "legend_include": FieldMeta(List[str], list, "Non-empty allowlist of metadata columns for heatmap annotations."),
+        "legend_exclude": FieldMeta(List[str], list, "Metadata columns to exclude from heatmap annotations."),
     }
 
 

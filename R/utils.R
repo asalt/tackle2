@@ -860,10 +860,12 @@ extract_rank_display_label <- function(value) {
   }
   value <- value[[1]]
 
-  # Tackle volcano names put the complete biological comparison in `group`.
-  group_match <- regexpr("(?:^|_)group_", value, ignore.case = TRUE, perl = TRUE)
-  if (group_match[[1]] > 0L) {
-    contrast_start <- group_match[[1]] + attr(group_match, "match.length")
+  # The final `group` field contains the biological comparison; earlier uses
+  # such as `group_contrasts` belong to the pipeline wrapper.
+  group_matches <- gregexpr("(?:^|_)group_", value, ignore.case = TRUE, perl = TRUE)[[1]]
+  if (group_matches[[1]] > 0L) {
+    group_lengths <- attr(group_matches, "match.length")
+    contrast_start <- tail(group_matches + group_lengths, 1L)
     contrast <- substr(value, contrast_start, nchar(value))
     contrast <- .trim_rank_label_suffix(contrast)
     contrast <- gsub("^_+|_+$", "", contrast)
@@ -1500,29 +1502,31 @@ infer_ordered_factor <- function(column) { # this probably doesn't do what you w
 
 
 myzscore <- function(value, minval = NA, remask = TRUE) {
-  mask <- is.na(value)
-  if (is.na(minval)) minval <- min(value, na.rm = TRUE)
+  mask <- is.na(value) | !is.finite(value)
+  observed <- value[!mask]
+  if (length(observed) == 0L) {
+    return(rep(NA_real_, length(value)))
+  }
 
-  if (minval == Inf) {
+  if (is.na(minval)) {
+    observed_sd <- stats::sd(observed)
+    offset <- if (is.finite(observed_sd) && observed_sd > 0) observed_sd else 1
+    minval <- min(observed) - offset
+  }
+  if (!is.finite(minval)) {
     minval <- 0
   }
 
-  value[is.na(value)] <- minval
-  # todo make smaller than min val
-  out <- scale(value)
-
-  # if all NA:
-  if (sum(!is.finite(out)) == length(out)) {
-    out[, 1] <- 0
+  value[mask] <- minval
+  out <- as.vector(scale(value))
+  if (all(!is.finite(out))) {
+    out[] <- 0
   }
 
-  if (remask == TRUE) {
-    out[mask] <- NA
+  if (isTRUE(remask)) {
+    out[mask] <- NA_real_
   }
-  # coerce to vector
-  out <- as.vector(out)
-
-  return(out)
+  out
 }
 
 dist_no_na <- function(mat) {
@@ -1534,59 +1538,74 @@ dist_no_na <- function(mat) {
 scale_gct <- function(gct, group_by = NULL) {
   log_msg(msg = "zscoring gct file by row")
   log_msg(msg = paste0("group_by is set to: ", group_by))
+  if (length(group_by) == 0L) {
+    group_by <- NULL
+  }
   if (is.logical(group_by) && length(group_by) == 1 && (isFALSE(group_by) || is.na(group_by))) {
     group_by <- NULL
   }
   if (is.character(group_by) && length(group_by) == 1 && is.na(group_by)) {
     group_by <- NULL
   }
-  group_cols <- group_by # this is a hack to get around the fact that group_by is a dplyr function
-  res <- gct %>%
-    melt_gct() # %>%
-  # Conditionally add group_by
-  if (!is.null(group_cols)) {
-    if (length(group_cols) == 1) {
-      res <- dplyr::group_by(res, id.x, !!rlang::sym(group_cols))
+  group_cols <- group_by
+  mat <- gct@mat
+
+  scale_rows <- function(block) {
+    if (nrow(block) == 0L || ncol(block) == 0L) {
+      return(block)
     }
-    if (length(group_cols) > 1) {
-      res <- dplyr::group_by(res, id.x, dplyr::across(dplyr::all_of(group_cols)))
-    }
+    scaled <- t(vapply(
+      seq_len(nrow(block)),
+      function(row_index) myzscore(block[row_index, ]),
+      numeric(ncol(block))
+    ))
+    dimnames(scaled) <- dimnames(block)
+    scaled
+  }
+
+  if (is.null(group_cols)) {
+    scaled_mat <- scale_rows(mat)
   } else {
-    res <- dplyr::group_by(res, id.x)
+    if (!is.character(group_cols) || anyNA(group_cols) || any(!nzchar(group_cols))) {
+      stop("group_by must be NULL or one or more non-empty metadata column names")
+    }
+    missing_group_cols <- setdiff(group_cols, colnames(gct@cdesc))
+    if (length(missing_group_cols) > 0L) {
+      stop("group_by columns not found in GCT metadata: ", paste(missing_group_cols, collapse = ", "))
+    }
+
+    cdesc <- gct@cdesc
+    if (all(gct@cid %in% rownames(cdesc))) {
+      cdesc <- cdesc[gct@cid, , drop = FALSE]
+    } else if ("id" %in% colnames(cdesc) && all(gct@cid %in% cdesc$id)) {
+      cdesc <- cdesc[match(gct@cid, cdesc$id), , drop = FALSE]
+    } else {
+      stop("GCT column metadata could not be aligned to matrix columns")
+    }
+
+    # Preserve missing metadata as a real grouping level so no samples vanish.
+    group_factors <- lapply(cdesc[, group_cols, drop = FALSE], function(column) {
+      addNA(as.factor(column), ifany = TRUE)
+    })
+    group_key <- do.call(
+      interaction,
+      c(group_factors, list(drop = TRUE, lex.order = TRUE))
+    )
+    column_groups <- split(seq_len(ncol(mat)), group_key, drop = TRUE)
+    scaled_mat <- matrix(
+      NA_real_,
+      nrow = nrow(mat),
+      ncol = ncol(mat),
+      dimnames = dimnames(mat)
+    )
+    for (column_indices in column_groups) {
+      scaled_mat[, column_indices] <- scale_rows(mat[, column_indices, drop = FALSE])
+    }
   }
 
-  res <- res %>%
-    dplyr::mutate(zscore = myzscore(value)) %>%
-    dplyr::ungroup()
-
-  # make a new gct and return
-  res <- res %>%
-    dplyr::select(id.x, id.y, zscore) %>%
-    tidyr::pivot_wider(names_from = id.y, values_from = zscore) %>%
-    as.data.frame()
-  rownames(res) <- res$id.x
-  res$id.x <- NULL
-  res <- as.matrix(res)
-  rdesc <- gct@rdesc
-  cdesc <- gct@cdesc
-
-  if (length(colnames(gct@rdesc)) == 1) {
-    rdesc["dummy"] <- "X"
-  }
-
-  if (length(colnames(res)) == 1) {
-    rdesc["dummy"] <- "X"
-  }
-
-  newgct <- new("GCT",
-    mat = res,
-    rid = rownames(res),
-    cid = colnames(res),
-    rdesc = rdesc[rownames(res), ],
-    cdesc = cdesc[colnames(res), ]
-  )
-
-  return(newgct)
+  scaled_gct <- gct
+  scaled_gct@mat <- scaled_mat
+  scaled_gct
 }
 
 

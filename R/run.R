@@ -798,7 +798,7 @@ run <- function(params) {
           # sample_order = params$extra$rankname_order, # get rid of this one, pretty sure
           rankname_order = rankname_order_for_plots,
           meta_to_include = params$heatmap_gsea$legend_include %||% params$legend_include,
-          meta_to_exclude = params$pca$heatmap_gsea$legend_exclude %||% params$legend_exclude
+          meta_to_exclude = params$heatmap_gsea$legend_exclude %||% params$legend_exclude
         )
       }
 

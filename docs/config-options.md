@@ -35,7 +35,7 @@ $ tackle2 describe params.bubbleplot --json
 - `gct_path` (string): Path to the expression GCT file (required when `ranks_from = "gct"` or `"model"`).
 - `model_file` (string, default `""`): Path to a TOML file containing a `[model]` table (optional helper when `ranks_from = "model"`).
 - `species` (string, default `"Homo sapiens"`): Species name passed to msigdbr.
-- `zscore_emat` (bool, default `true`): Z-score expression matrix before analysis.
+- `zscore_emat` (bool, default `true`): Z-score expression matrix before analysis. Missing or nonfinite values are temporarily placed one observed standard deviation below the row minimum for scaling, then remasked.
 - `zscore_emat_groupby` (string/bool, default `false`): Grouping column for Z-score normalisation.
 - `cut_by` (string, default `"group"`): Metadata column controlling chart faceting.
 - `pathways_of_interest` (array of strings, default `[]`): Additional pathway names to include in enrichment-plot selection when they are present in the analyzed collection.
@@ -116,12 +116,16 @@ Enabled individual plots write `pathway_counts.json` inside each rank's bar or b
 - `cut_by` (string): Override for grouping.
 - `cluster_rows` (bool, default `true`)
 - `cluster_columns` (array of bool, default `[false,true]`)
-- `legend_include` (array of strings): Metadata columns to add to legend.
+- `legend_include` (array of strings, default `[]`): When non-empty, only these metadata columns are shown as heatmap annotations. An empty list uses all ordinary metadata columns.
+- `legend_exclude` (array of strings, default `[]`): Metadata columns removed after include/default selection.
 
 ## params.heatmap_gene
 
 - `do` (bool, default `true`)
 - `limit` (int, default `10`)
+- `legend_include` (array of strings, default `[]`): When non-empty, only these GCT metadata columns are shown as heatmap annotations. An empty list uses all ordinary metadata columns.
+- `legend_exclude` (array of strings, default `[]`): Metadata columns removed after include/default selection.
+- Expression heatmaps use symmetric blue-white-red limits at the 97.5th percentile of absolute values from the complete scaled matrix. Leading-edge and PCA-loading subsets reuse those full-matrix limits.
 
 ## params.pca (GSEA)
 

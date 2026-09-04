@@ -29,3 +29,11 @@ def test_describe_section_root_and_nested():
     advanced = config_schema.describe_section("params.bubbleplot.advanced")
     assert any(field.name == "stroke_width" for field in advanced.fields)
     assert any(field.name == "height_scale" for field in advanced.fields)
+
+    heatmap_gsea = config_schema.describe_section("params.heatmap_gsea")
+    heatmap_gsea_fields = {field.name for field in heatmap_gsea.fields}
+    assert {"legend_include", "legend_exclude"}.issubset(heatmap_gsea_fields)
+
+    heatmap_gene = config_schema.describe_section("params.heatmap_gene")
+    heatmap_gene_fields = {field.name for field in heatmap_gene.fields}
+    assert {"legend_include", "legend_exclude"}.issubset(heatmap_gene_fields)

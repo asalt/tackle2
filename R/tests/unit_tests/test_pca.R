@@ -8,6 +8,9 @@ src_dir <- file.path(here("R"))
 pca_tools <- new.env()
 source(file.path(src_dir, "pca.R"), local = pca_tools)
 
+io_tools <- new.env()
+source(file.path(src_dir, "io.R"), local = io_tools)
+
 
 make_fake_gsea <- function(n_pathways = 5, n_ranks = 3) {
   grid <- expand.grid(
@@ -100,6 +103,47 @@ test_that("plot_biplot handles non-existent color by metadata gracefully", {
   pca_object <- pca_tools$do_one(fake_data)
   # pca_tools$plot_biplot(pca_object, colby = "nonexistent")
   expect_warning(pca_tools$plot_biplot(pca_object, colby = "nonexistent"), regexp = "nonexistent not found in metadata")
+})
+
+test_that("gene loading heatmaps derive colors before selecting top genes", {
+  gct <- io_tools$make_random_gct(4, 3)
+  gct@mat[,] <- matrix(
+    c(-40, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8),
+    nrow = 4
+  )
+  loadings <- matrix(c(0.1, 0.9, 0.2, 0.3), ncol = 1)
+  rownames(loadings) <- gct@rid
+  colnames(loadings) <- "PC1"
+  pca_object <- list(loadings = loadings)
+  expected_limit <- unname(stats::quantile(abs(gct@mat), probs = 0.975))
+  captured_breaks <- NULL
+  original_heatmap <- pca_tools$plot_tools$make_heatmap_fromgct
+  assign(
+    "make_heatmap_fromgct",
+    function(gct, color_mapper = NULL, ...) {
+      captured_breaks <<- attr(color_mapper, "breaks")
+      NULL
+    },
+    envir = pca_tools$plot_tools
+  )
+
+  tryCatch(
+    pca_tools$plot_gene_loadings_heatmap(
+      pca_object,
+      components = "PC1",
+      top_n = 1,
+      gct = gct,
+      cluster_rows = FALSE,
+      cluster_columns = FALSE
+    ),
+    finally = assign(
+      "make_heatmap_fromgct",
+      original_heatmap,
+      envir = pca_tools$plot_tools
+    )
+  )
+
+  expect_equal(captured_breaks, c(-expected_limit, 0, expected_limit))
 })
 
 # test_that("plot_biplot creates a plot with the correct dimensions", {

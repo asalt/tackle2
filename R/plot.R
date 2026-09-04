@@ -51,6 +51,74 @@ handle_save_func <- function(save_func, path, filename, width = NULL, height = N
   return(save_func)
 }
 
+normalize_heatmap_metadata_columns <- function(columns) {
+  if (is.null(columns) || length(columns) == 0L || identical(columns, FALSE)) {
+    return(character(0))
+  }
+
+  columns <- trimws(as.character(unlist(columns, use.names = FALSE)))
+  unique(columns[!is.na(columns) & nzchar(columns)])
+}
+
+select_heatmap_annotation_metadata <- function(
+    metadata,
+    meta_to_include = NULL,
+    meta_to_exclude = NULL,
+    default_meta_to_exclude = character(0),
+    always_exclude = c("id", "dummy"),
+    context = "heatmap") {
+  if (is.null(metadata)) {
+    return(NULL)
+  }
+  metadata <- as.data.frame(metadata, check.names = FALSE)
+
+  include <- normalize_heatmap_metadata_columns(meta_to_include)
+  exclude <- normalize_heatmap_metadata_columns(meta_to_exclude)
+  defaults <- normalize_heatmap_metadata_columns(default_meta_to_exclude)
+  available <- colnames(metadata)
+
+  if (length(include) > 0L) {
+    missing <- setdiff(include, available)
+    if (length(missing) > 0L) {
+      log_msg(warning = paste0(
+        context, ": legend_include columns not present in metadata: ",
+        paste(missing, collapse = ", ")
+      ))
+    }
+    selected <- include[include %in% available]
+  } else {
+    selected <- setdiff(available, defaults)
+  }
+
+  selected <- setdiff(selected, c(exclude, always_exclude))
+  metadata[, selected, drop = FALSE]
+}
+
+make_symmetric_color_mapper <- function(
+    values,
+    probability = 0.975,
+    colors = c("blue", "white", "red")) {
+  if (length(probability) != 1L || !is.finite(probability) || probability <= 0 || probability > 1) {
+    stop("probability must be a finite number greater than 0 and no greater than 1")
+  }
+
+  values <- as.numeric(values)
+  finite_values <- abs(values[is.finite(values)])
+  limit <- if (length(finite_values) > 0L) {
+    unname(stats::quantile(finite_values, probs = probability, na.rm = TRUE))
+  } else {
+    1
+  }
+  if (!is.finite(limit) || limit <= 0) {
+    limit <- if (length(finite_values) > 0L) max(finite_values) else 1
+  }
+  if (!is.finite(limit) || limit <= 0) {
+    limit <- 1
+  }
+
+  circlize::colorRamp2(c(-limit, 0, limit), colors)
+}
+
 
 make_heatmap_fromgct <- function(
     gct,
@@ -63,8 +131,8 @@ make_heatmap_fromgct <- function(
     sample_order = NULL,
     cut_by = NULL,
     autoscale = TRUE,
-    meta_to_include = NULL, # if NULL uses all
-    meta_to_exclude = NULL, # if NULL filters nothing out
+    meta_to_include = NULL, # non-empty values form an annotation allowlist
+    meta_to_exclude = NULL, # applied after include/default selection
     colorbar_title = "zscore",
     cluster_column_slices = TRUE,
     sample_exclude = NULL,
@@ -117,17 +185,18 @@ make_heatmap_fromgct <- function(
   }
 
   default_meta_to_exclude <- c("recno", "runno", "searchno", "label", "expr_col", "expr_file", "assay", "tube", "Tube", "TubeLabel", "id")
-  # If user specifies additional meta_to_exclude, merge with defaults
-  if (!is.null(meta_to_exclude)) {
-    meta_to_exclude <- union(default_meta_to_exclude, meta_to_exclude)
-  } else {
-    meta_to_exclude <- default_meta_to_exclude
-  }
 
   # cat("make_heatmap\n")
   ca <- NULL
 
-  cdesc_for_annot <- gct@cdesc %>% select(-any_of(meta_to_exclude))
+  cdesc_for_annot <- select_heatmap_annotation_metadata(
+    gct@cdesc,
+    meta_to_include = meta_to_include,
+    meta_to_exclude = meta_to_exclude,
+    default_meta_to_exclude = default_meta_to_exclude,
+    always_exclude = "id",
+    context = "gene heatmap"
+  )
 
   # would be better to do this earlier
   # Prepare metadata columns for annotation: keep numeric as numeric (continuous),
@@ -147,17 +216,22 @@ make_heatmap_fromgct <- function(
       cdesc_for_annot[[col]] <- .col
     }
   }
-  cdesc_for_annot <- cdesc_for_annot %>%
-    arrange(across(everything()))
+  if (ncol(cdesc_for_annot) > 0L) {
+    cdesc_for_annot <- cdesc_for_annot %>%
+      arrange(across(everything()))
+  }
   .mat <- gct@mat[, rownames(cdesc_for_annot)]
+  if (is.null(color_mapper)) {
+    color_mapper <- make_symmetric_color_mapper(.mat)
+  }
 
-  .colors <- plot_utils$create_named_color_list(cdesc_for_annot, colnames(cdesc_for_annot), c = 124)
-  # if ("group" %in% colnames(gct@cdesc)) {
-  ca <- ComplexHeatmap::columnAnnotation(
-    df = cdesc_for_annot,
-    col = .colors
-  )
-  # }
+  if (ncol(cdesc_for_annot) > 0L) {
+    .colors <- plot_utils$create_named_color_list(cdesc_for_annot, colnames(cdesc_for_annot), c = 124)
+    ca <- ComplexHeatmap::columnAnnotation(
+      df = cdesc_for_annot,
+      col = .colors
+    )
+  }
 
 
 
@@ -204,7 +278,8 @@ make_heatmap_fromgct <- function(
     heatmap_matrix_height <- unit(nrow(.mat) * .2, "in")
   }
 
-  cut_by <- plot_utils$process_cut_by(cut_by, cdesc_for_annot)
+  cut_by_metadata <- gct@cdesc[rownames(cdesc_for_annot), , drop = FALSE]
+  cut_by <- plot_utils$process_cut_by(cut_by, cut_by_metadata)
 
   # print(paste0("cutby : ", cut_by))
 
@@ -230,6 +305,7 @@ make_heatmap_fromgct <- function(
 
   ht <- ComplexHeatmap::Heatmap(
     .mat,
+    col = color_mapper,
     width = heatmap_matrix_width,
     height = heatmap_matrix_height,
     # TODO use z_score_withna or other custom func for handling nas when scaling
@@ -317,6 +393,7 @@ plot_heatmap_of_edges <- function(
     ...) {
   # transform for plotting
   .gct <- if (scale) util_tools$scale_gct(gct, group_by = scale_by) else gct
+  color_mapper <- make_symmetric_color_mapper(.gct@mat)
 
   colorbar_title <- if (scale_by %in% colnames(.gct@cdesc)) {
     paste0("zscore by ", scale_by)
@@ -460,7 +537,8 @@ plot_heatmap_of_edges <- function(
           meta_to_include = meta_to_include,
           meta_to_exclude = meta_to_exclude,
           sample_exclude = sample_exclude,
-          colorbar_title = colorbar_title
+          colorbar_title = colorbar_title,
+          color_mapper = color_mapper
           # ...
         ),
         error = function(e) log_msg(error = paste("failed to produce heatmap:", e$message))
@@ -1691,7 +1769,7 @@ plot_results_one_collection <- function(
     cluster_columns = FALSE,
     sample_order = NULL,
     rankname_order = NULL,
-    meta_to_exclude = c("recno", "runno", "searchno", "label"),
+    meta_to_exclude = NULL,
     meta_to_include = NULL,
     row_annotation = NULL, # can be passed if made somewhere else
     save_func = NULL,
@@ -1720,13 +1798,6 @@ plot_results_one_collection <- function(
     "Tube",
     "TubeLabel"
   )
-  # If user specifies additional meta_to_exclude, merge with defaults
-  if (!is.null(meta_to_exclude)) {
-    meta_to_exclude <- union(default_meta_to_exclude, meta_to_exclude)
-  } else {
-    meta_to_exclude <- default_meta_to_exclude
-  }
-
   # log_msg(msg = paste0("rankname order is ", rankname_order))
 
   # Ensure necessary columns are present
@@ -1797,9 +1868,7 @@ plot_results_one_collection <- function(
     metadata <- data.frame(id = unique(df$rankname), dummy = "X") # necessary for some reason
     rownames(metadata) <- metadata$id
   }
-  metadata <- metadata[rankname_order, ] # order metadata by rankname_order
-
-  metadata %<>% dplyr::select(-any_of(meta_to_exclude)) # remove columns
+  metadata <- metadata[rankname_order, , drop = FALSE] # order metadata by rankname_order
 
   # Handling cut_by parameter
   # print(paste0("cutting by :", cut_by))
@@ -1903,9 +1972,14 @@ plot_results_one_collection <- function(
   # Prepare column annotation
   # log_msg(msg = paste0("metadata: ", head(metadata)))
 
-  # it isn't strictly necessary to exclude these colum s here,
-  # as they will be excluded upon creation of the column_annotation object
-  metadata_for_colors <- metadata %>% dplyr::select(-any_of(c("id", "dummy")))
+  metadata_for_colors <- select_heatmap_annotation_metadata(
+    metadata,
+    meta_to_include = meta_to_include,
+    meta_to_exclude = meta_to_exclude,
+    default_meta_to_exclude = default_meta_to_exclude,
+    always_exclude = c("id", "dummy"),
+    context = "GSEA heatmap"
+  )
   # Coerce numeric-like metadata (incl. decimals) to numeric for continuous annotations
   if (ncol(metadata_for_colors) > 0) {
     for (.colname in colnames(metadata_for_colors)) {

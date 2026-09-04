@@ -582,6 +582,7 @@ plot_gene_loadings_heatmap <- function(
     log_msg(warning = "Gene PCA heatmap skipped: expression GCT not supplied.")
     return(NULL)
   }
+  color_mapper <- plot_tools$make_symmetric_color_mapper(gct@mat)
 
   missing_genes <- setdiff(gene_subset, gct@rid)
   if (length(missing_genes) > 0) {
@@ -698,6 +699,7 @@ plot_gene_loadings_heatmap <- function(
       save_func = save_target,
       cluster_rows = cluster_rows_flag,
       cluster_columns = cluster_columns_flag,
+      color_mapper = color_mapper,
       colorbar_title = "zscore",
       cut_by = cut_by_value,
       row_annotation = row_annotation

@@ -68,6 +68,110 @@ make_main_pathway_plot_results <- function() {
 
 # ================================ tests ================================
 
+test_that("heatmap metadata include and exclude controls form an allowlist", {
+  metadata <- data.frame(
+    id = c("sample_A", "sample_B"),
+    group = c("control", "treated"),
+    treatment = c("vehicle", "drug"),
+    batch = c("one", "two"),
+    label = c("A", "B"),
+    row.names = c("sample_A", "sample_B")
+  )
+
+  selected <- plot_tools$select_heatmap_annotation_metadata(
+    metadata,
+    meta_to_include = c("treatment", "group", "label"),
+    meta_to_exclude = "group",
+    default_meta_to_exclude = c("label"),
+    always_exclude = "id"
+  )
+
+  expect_identical(colnames(selected), c("treatment", "label"))
+  expect_identical(rownames(selected), rownames(metadata))
+})
+
+test_that("empty heatmap metadata include uses defaults and explicit exclusions", {
+  metadata <- data.frame(
+    id = c("sample_A", "sample_B"),
+    group = c("control", "treated"),
+    treatment = c("vehicle", "drug"),
+    batch = c("one", "two"),
+    label = c("A", "B"),
+    row.names = c("sample_A", "sample_B")
+  )
+
+  selected <- plot_tools$select_heatmap_annotation_metadata(
+    metadata,
+    meta_to_include = character(0),
+    meta_to_exclude = "batch",
+    default_meta_to_exclude = "label",
+    always_exclude = "id"
+  )
+
+  expect_identical(colnames(selected), c("group", "treatment"))
+})
+
+test_that("symmetric heatmap colors use a robust absolute-value limit", {
+  values <- matrix(c(-20, -3, -1, 0, 1, 2, 4, NA_real_), nrow = 2)
+  mapper <- plot_tools$make_symmetric_color_mapper(values)
+  expected_limit <- unname(stats::quantile(
+    abs(values[is.finite(values)]),
+    probs = 0.975
+  ))
+
+  expect_equal(attr(mapper, "breaks"), c(-expected_limit, 0, expected_limit))
+  expect_equal(
+    mapper(c(-expected_limit, 0, expected_limit)),
+    c("#0000FFFF", "#FFFFFFFF", "#FF0000FF")
+  )
+})
+
+test_that("leading-edge heatmaps share colors derived from the full GCT", {
+  gct <- io_tools$make_random_gct(4, 3)
+  gct@mat[,] <- matrix(
+    c(-40, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8),
+    nrow = 4
+  )
+  results <- list(
+    TEST_COLLECTION = list(
+      comparison_A = tibble::tibble(
+        pathway = "TEST_PATHWAY",
+        pval = 0.01,
+        padj = 0.02,
+        NES = 2,
+        leadingEdge = list(gct@rid[[2]])
+      )
+    )
+  )
+  expected_limit <- unname(stats::quantile(abs(gct@mat), probs = 0.975))
+  captured_breaks <- NULL
+  original_heatmap <- plot_tools$make_heatmap_fromgct
+  assign(
+    "make_heatmap_fromgct",
+    function(gct, color_mapper = NULL, ...) {
+      captured_breaks <<- attr(color_mapper, "breaks")
+      NULL
+    },
+    envir = plot_tools
+  )
+
+  tryCatch(
+    plot_tools$plot_heatmap_of_edges(
+      gct,
+      results,
+      scale = FALSE,
+      scale_by = "metavar1",
+      limit = 1,
+      cut_by = NA,
+      cluster_rows = FALSE,
+      cluster_columns = FALSE
+    ),
+    finally = assign("make_heatmap_fromgct", original_heatmap, envir = plot_tools)
+  )
+
+  expect_equal(captured_breaks, c(-expected_limit, 0, expected_limit))
+})
+
 
 test_that("test formatting for barplot", {
   data <- TEST_DATA[[1]][[1]]

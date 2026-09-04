@@ -926,6 +926,8 @@ load_and_process_rank_inputs <- function(params) {
     validate_gct_species(gct_path, params$species %||% "Homo sapiens", logger = log_msg)
   }
 
+  # TODO: When ranks_from is "gct", validate cached rank filenames against the
+  # current GCT column IDs so sample renames cannot silently reuse stale names.
   if (!is.null(rankfiledir) && file.exists(rankfiledir)) { #
     rnkfiles <- dir_ls(path = rankfiledir, regexp = ".*\\.rnk$", fail = FALSE)
     log_msg(msg = paste0("looking for rank files in ", rankfiledir))

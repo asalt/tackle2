@@ -56,10 +56,13 @@ cut_by = false
 cluster_rows = true
 cluster_columns = [false, true]
 legend_include = []
+legend_exclude = []
 
 [params.heatmap_gene]
 do = true
 limit = 10
+legend_include = []
+legend_exclude = []
 
 [params.pca]
 do = false

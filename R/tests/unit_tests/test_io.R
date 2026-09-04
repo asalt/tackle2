@@ -436,6 +436,24 @@ test_that("create_rnkfiles_from_gct object", {
   })
 })
 
+test_that("GCT rank creation uses minimum-minus-SD scaling for missing values", {
+  withr::with_tempdir({
+    gct <- io_tools$make_random_gct(2, 4)
+    gct@mat[1, ] <- c(2, 4, 8, NA_real_)
+    gct_path <- file.path(tempdir(), "missing_values.gct")
+    cmapR::write_gct(gct, gct_path, appenddim = FALSE)
+
+    ranks <- io_tools$create_rnkfiles_from_emat(gct_path, apply_z_score = TRUE)
+    fill <- 2 - stats::sd(c(2, 4, 8))
+    expected <- as.vector(scale(c(2, 4, 8, fill)))
+
+    expect_equal(ranks[[gct@cid[[1]]]]$value[[1]], expected[[1]], tolerance = 1e-3)
+    expect_equal(ranks[[gct@cid[[2]]]]$value[[1]], expected[[2]], tolerance = 1e-3)
+    expect_equal(ranks[[gct@cid[[3]]]]$value[[1]], expected[[3]], tolerance = 1e-3)
+    expect_true(is.na(ranks[[gct@cid[[4]]]]$value[[1]]))
+  })
+})
+
 test_that("create_rnkfiles_from_model fits limma contrasts", {
   withr::with_tempdir({
     gct <- io_tools$make_random_gct(12, 6)

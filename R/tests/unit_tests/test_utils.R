@@ -66,6 +66,54 @@ testthat::test_that("test scale gct group_by NA does not error", {
   )
 })
 
+testthat::test_that("myzscore places missing observations below the observed minimum", {
+  values <- c(2, 4, 8, NA_real_, Inf)
+  observed <- values[is.finite(values)]
+  fill <- min(observed) - stats::sd(observed)
+  expected <- as.vector(scale(c(observed, fill, fill)))
+  expected[4:5] <- NA_real_
+
+  testthat::expect_equal(util_tools$myzscore(values), expected)
+})
+
+testthat::test_that("myzscore handles complete, constant, and unobserved rows", {
+  values <- c(1, 3, 7)
+  testthat::expect_equal(util_tools$myzscore(values), as.vector(scale(values)))
+  testthat::expect_equal(util_tools$myzscore(rep(5, 3)), rep(0, 3))
+  testthat::expect_equal(
+    util_tools$myzscore(c(NA_real_, Inf, -Inf)),
+    rep(NA_real_, 3)
+  )
+})
+
+testthat::test_that("scale_gct applies tackle-style missing-value z-scores", {
+  gct <- io_tools$make_random_gct(2, 4)
+  gct@mat[1, ] <- c(2, 4, 8, NA_real_)
+
+  scaled <- util_tools$scale_gct(gct)
+
+  testthat::expect_equal(
+    unname(scaled@mat[1, ]),
+    util_tools$myzscore(c(2, 4, 8, NA_real_))
+  )
+})
+
+testthat::test_that("scale_gct preserves grouped scaling and GCT metadata", {
+  gct <- io_tools$make_random_gct(2, 6)
+  gct@mat[1, ] <- c(2, 4, NA_real_, 10, 14, 18)
+  gct@cdesc$batch <- rep(c("A", "B"), each = 3)
+
+  scaled <- util_tools$scale_gct(gct, group_by = "batch")
+  expected <- c(
+    util_tools$myzscore(c(2, 4, NA_real_)),
+    util_tools$myzscore(c(10, 14, 18))
+  )
+
+  testthat::expect_equal(unname(scaled@mat[1, ]), expected)
+  testthat::expect_identical(scaled@cdesc, gct@cdesc)
+  testthat::expect_identical(scaled@rdesc, gct@rdesc)
+})
+
 testthat::test_that("process_cut_by treats NA as NULL", {
   cdesc <- data.frame(group = c("A", "B"), stringsAsFactors = FALSE)
   rownames(cdesc) <- c("s1", "s2")
@@ -153,6 +201,20 @@ testthat::test_that("default rank labels handle repeated metadata keys without t
   testthat::expect_equal(
     unname(name_map),
     c("treatmentB_minus_treatmentA", "metadata-varB_minus_metadata-varA")
+  )
+})
+
+testthat::test_that("default rank labels use the rightmost structural group field", {
+  ranknames <- c(
+    "RUN_A4B8_group_contrasts_batchcorrect_nz1_dir_B_fna_T_group_control_exosome_hs_imv_T_med",
+    "RUN_A4B8_group_contrasts_batchcorrect_nz1_dir_B_fna_T_group_strain_effect_ls_imv_T_med"
+  )
+
+  name_map <- util_tools$make_default_rank_label_map(ranknames)
+
+  testthat::expect_equal(
+    unname(name_map),
+    c("control_exosome_hs", "strain_effect_ls")
   )
 })
 
